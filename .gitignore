@@ -12,6 +12,8 @@ dist
 dist-ssr
 *.local
 .env
+atlas-credentials.env
+desktop.ini
 
 # Editor directories and files
 .vscode/*
