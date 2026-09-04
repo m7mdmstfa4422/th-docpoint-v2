@@ -12,8 +12,8 @@ export default defineConfig({
       registerType: 'autoUpdate',
       includeAssets: ['public/logo.png'],
       manifest: {
-        name: 'عيادة د. أحمد الرفاعي',
-        short_name: 'العيادة',
+        name: 'DocPoint',
+        short_name: 'DocPoint',
         description: 'المنظومة الطبية الذكية لإدارة العيادات',
         theme_color: '#0284c7',
         background_color: '#ffffff',

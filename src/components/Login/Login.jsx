@@ -115,7 +115,7 @@ export default function Login() {
           {/* محتوى وسطي وترحيبي */}
           <div className="relative z-10 my-auto space-y-4">
             <h2 className="text-3xl font-black leading-snug tracking-tight text-white lg:text-4xl">
-              عيادة د. أحمد الرفاعي
+              DocPoint
             </h2>
             <p className="max-w-sm text-xs leading-relaxed text-sky-100/75 lg:text-sm">
               إدارة شاملة وسريعة لملفات المرضى، سجل الكشوفات، والإيرادات المالية في بيئة آمنة ومشفرة.

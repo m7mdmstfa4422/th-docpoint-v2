@@ -11,7 +11,6 @@ import {
   Sparkles, 
   Building2, 
   MapPin, 
-  Globe2, 
   Loader2,
   Calendar,
   Phone,
@@ -19,11 +18,12 @@ import {
 } from 'lucide-react';
 import { api } from '../../api';
 
-const initialFilters = { from: '', to: '', clinic: '', nationality: '' };
+const initialFilters = { from: '', to: '', clinic: '', checkupType: '' };
 
 export default function Reports() {
-  const [rawData, setRawData] = useState({ rows: [], summary: null });
+  const [rawData, setRawData] = useState({ rows: [], typeRows: [], summary: null });
   const [clinics, setClinics] = useState([]);
+  const [checkupTypes, setCheckupTypes] = useState([]);
   const [filters, setFilters] = useState(initialFilters);
   const [appliedFilters, setAppliedFilters] = useState(initialFilters);
   const [loading, setLoading] = useState(false);
@@ -39,7 +39,7 @@ export default function Reports() {
       if (currentFilters.from) queryObj.from = currentFilters.from;
       if (currentFilters.to) queryObj.to = currentFilters.to;
       if (currentFilters.clinic) queryObj.clinic = currentFilters.clinic;
-      if (currentFilters.nationality?.trim()) queryObj.nationality = currentFilters.nationality.trim();
+      if (currentFilters.checkupType) queryObj.checkupType = currentFilters.checkupType;
 
       const queryString = new URLSearchParams(queryObj).toString();
       const endpoint = queryString ? `/reports?${queryString}` : '/reports';
@@ -49,6 +49,7 @@ export default function Reports() {
 
       setRawData({
         rows,
+        typeRows: Array.isArray(res?.typeRows) ? res.typeRows : [],
         summary: res?.summary || null
       });
       setAppliedFilters(currentFilters);
@@ -63,6 +64,7 @@ export default function Reports() {
     api('/clinics')
       .then((res) => setClinics(Array.isArray(res) ? res : []))
       .catch((err) => setMessage(err.message));
+    api('/reports/checkup-types').then((res) => setCheckupTypes(Array.isArray(res) ? res : [])).catch((err) => setMessage(err.message));
     fetchReports(initialFilters);
   }, [fetchReports]);
 
@@ -94,16 +96,7 @@ export default function Reports() {
         }
       }
 
-      // 2. فلتر الجنسية (Text Input - غير حساس لحالة الأحرف ومطابقة جزئية)
-      if (appliedFilters.nationality?.trim() && row.nationality) {
-        const targetNat = appliedFilters.nationality.trim().toLowerCase();
-        const rowNat = String(row.nationality).toLowerCase();
-        if (!rowNat.includes(targetNat)) {
-          return false;
-        }
-      }
-
-      // 3. فلتر التواريخ
+      // 2. فلتر التواريخ
       const recordDate = row.date || row.createdAt || row.visitDate;
       if (recordDate) {
         const itemDate = new Date(recordDate).getTime();
@@ -130,10 +123,11 @@ export default function Reports() {
   // تصدير النتائج
   const exportToCSV = () => {
     if (!displayRows.length) return;
-    const headers = ['اسم العيادة', 'الموقع/الفرع', 'التخصص', 'رقم الهاتف', 'عدد الزائرين', 'إجمالي الدخل (ج)'];
+    const headers = ['اسم العيادة', 'الموقع/الفرع', 'نوع الكشف', 'التخصص', 'رقم الهاتف', 'عدد الزائرين', 'إجمالي الدخل (ج)'];
     const csvRows = displayRows.map((r) => [
       `"${r.name || r.clinicName || '—'}"`,
       `"${r.location || r.branch || '—'}"`,
+      `"${r.checkupType || appliedFilters.checkupType || 'كل الأنواع'}"`,
       `"${r.specialty || 'عام'}"`,
       `"${r.phone || '—'}"`,
       Number(r.visitors || r.visits || r.patientCount || 0),
@@ -214,14 +208,14 @@ export default function Reports() {
               </div>
               <span>خيارات التصفية والاستعلام</span>
             </div>
-            {(appliedFilters.from || appliedFilters.to || appliedFilters.clinic || appliedFilters.nationality) && (
+            {(appliedFilters.from || appliedFilters.to || appliedFilters.clinic || appliedFilters.checkupType) && (
               <span className="rounded-full bg-sky-50 border border-sky-200 px-3 py-1 text-[11px] font-bold text-sky-800">
                 يوجد فلاتر مفعّلة حالياً
               </span>
             )}
           </div>
 
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-5">
             <div>
               <label className="text-xs font-semibold text-slate-600 mb-1 flex items-center gap-1.5">
                 <Calendar className="h-3.5 w-3.5 text-sky-600" /> من تاريخ
@@ -268,17 +262,11 @@ export default function Reports() {
             </div>
 
             <div>
-              <label className="text-xs font-semibold text-slate-600 mb-1 flex items-center gap-1.5">
-                <Globe2 className="h-3.5 w-3.5 text-sky-600" /> الجنسية
-              </label>
-              <input
-                name="nationality"
-                type="text"
-                placeholder="اكتب الجنسية (اتركها فارغة للكل)..."
-                value={filters.nationality}
-                onChange={handleInputChange}
-                className="w-full rounded-2xl border border-slate-200 bg-slate-50/60 p-2.5 text-sm text-slate-800 placeholder-slate-400 outline-none transition-all focus:border-sky-600 focus:bg-white focus:ring-2 focus:ring-sky-100"
-              />
+              <label className="text-xs font-semibold text-slate-600 mb-1 flex items-center gap-1.5"><Stethoscope className="h-3.5 w-3.5 text-sky-600" /> نوع الكشف</label>
+              <select name="checkupType" value={filters.checkupType} onChange={handleInputChange} className="w-full rounded-2xl border border-slate-200 bg-slate-50/60 p-2.5 text-sm text-slate-800 outline-none transition-all focus:border-sky-600 focus:bg-white focus:ring-2 focus:ring-sky-100">
+                <option value="">كل أنواع الكشف</option>
+                {checkupTypes.map((title) => <option key={title} value={title}>{title}</option>)}
+              </select>
             </div>
           </div>
 
@@ -349,16 +337,17 @@ export default function Reports() {
           <div className="p-6 border-b border-slate-100 flex items-center justify-between">
             <div>
               <h3 className="font-bold text-slate-900">سجلات الفروع المسترجعة ({displayRows.length})</h3>
-              <p className="text-xs text-slate-400 mt-0.5">البيانات المالية والتشغيلية المحدثة</p>
+              <p className="text-xs text-slate-400 mt-0.5">{appliedFilters.checkupType ? `نتائج نوع الكشف: ${appliedFilters.checkupType}` : 'البيانات المالية والتشغيلية لجميع أنواع الكشف'}</p>
             </div>
           </div>
 
           <div className="overflow-x-auto overscroll-x-contain">
-            <table className="min-w-[820px] w-full text-right">
+            <table className="min-w-[940px] w-full text-right">
               <thead className="bg-slate-50/70 text-xs font-bold text-slate-600">
                 <tr>
                   <th className="p-4">العيادة والتخصص</th>
                   <th className="p-4">الموقع ورقم التواصل</th>
+                  <th className="p-4">نوع الكشف</th>
                   <th className="p-4">الزائرون</th>
                   <th className="p-4">إجمالي الدخل</th>
                   <th className="p-4">حصة الإيراد</th>
@@ -417,6 +406,8 @@ export default function Reports() {
                             </div>
                           </td>
 
+                          <td className="p-4"><span className="inline-flex items-center gap-1 rounded-xl border border-violet-100 bg-violet-50 px-2.5 py-1 text-xs font-bold text-violet-800"><Stethoscope className="h-3 w-3" />{row.checkupType || appliedFilters.checkupType || 'كل الأنواع'}</span></td>
+
                           <td className="p-4">
                             <span className="inline-flex items-center rounded-xl border border-slate-200/80 bg-slate-50 px-2.5 py-1 text-xs font-bold text-slate-700">
                               {visitorsCount.toLocaleString('ar-EG')} زيارة
@@ -447,7 +438,7 @@ export default function Reports() {
                     })
                   ) : (
                     <tr>
-                      <td colSpan={5} className="p-8 text-center text-sm text-slate-400">
+                      <td colSpan={6} className="p-8 text-center text-sm text-slate-400">
                         {loading ? 'جارٍ جلب وتطبيق الفلاتر...' : 'لا توجد نتائج مطابقة للخيارات المحددة.'}
                       </td>
                     </tr>
@@ -462,6 +453,11 @@ export default function Reports() {
               {message}
             </p>
           )}
+        </motion.section>
+
+        <motion.section initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4, delay: 0.25 }} className="overflow-hidden rounded-3xl border border-violet-100 bg-white shadow-sm">
+          <div className="flex items-center justify-between border-b border-violet-100 p-6"><div><h3 className="font-bold text-slate-900">تحليل الحضور حسب نوع الكشف ({rawData.typeRows.length})</h3><p className="mt-0.5 text-xs text-slate-400">بيانات مباشرة من أنواع الكشف المخزنة في الإعدادات ومن سجلات الزيارات</p></div><Stethoscope className="h-5 w-5 text-violet-600" /></div>
+          <div className="overflow-x-auto"><table className="min-w-[1050px] w-full text-right"><thead className="bg-violet-50/50 text-xs font-bold text-slate-600"><tr><th className="p-4">نوع الكشف</th><th className="p-4">عدد الأشخاص</th><th className="p-4">عدد الكشوف</th><th className="p-4">قيمة الكشوف</th><th className="p-4">المبلغ المحصل</th><th className="p-4">المتبقي</th><th className="p-4">متوسط التحصيل / كشف</th></tr></thead><tbody className="divide-y divide-slate-100 text-sm">{rawData.typeRows.length ? rawData.typeRows.map((row) => { const totalCost = Number(row.totalCost || 0); const revenue = Number(row.revenue || 0); const remaining = Math.max(0, totalCost - revenue); return <tr key={row.id || row.name} className="hover:bg-violet-50/30"><td className="p-4 font-bold text-slate-800">{row.name}</td><td className="p-4"><span className="rounded-xl bg-violet-50 px-2.5 py-1 font-bold text-violet-800">{Number(row.people || 0).toLocaleString('ar-EG')} شخص</span></td><td className="p-4 font-bold">{Number(row.visits || 0).toLocaleString('ar-EG')} كشف</td><td className="p-4 text-slate-700">{totalCost.toLocaleString('ar-EG')} ج</td><td className="p-4 font-black text-emerald-700">{revenue.toLocaleString('ar-EG')} ج</td><td className="p-4 font-bold text-rose-600">{remaining.toLocaleString('ar-EG')} ج</td><td className="p-4 text-slate-600">{row.visits ? Math.round(revenue / row.visits).toLocaleString('ar-EG') : 0} ج</td></tr>}) : <tr><td colSpan={7} className="p-8 text-center text-sm text-slate-400">لا توجد أنواع كشف مطابقة للفلاتر.</td></tr>}</tbody></table></div>
         </motion.section>
 
       </div>

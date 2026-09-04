@@ -13,7 +13,9 @@ import {
   AlertCircle, 
   X, 
   Pencil,
-  Loader2
+  Loader2,
+  Activity,
+  Trash2
 } from 'lucide-react';
 import { api } from '../../api';
 import { AuthContext } from '../../AuthProvider';
@@ -68,7 +70,9 @@ export default function Settings() {
   const { admin: currentAdmin } = useContext(AuthContext);
   const [clinics, setClinics] = useState([]);
   const [admins, setAdmins] = useState([]);
-  const [loading, setLoading] = useState(false);
+  const [checkupTypes, setCheckupTypes] = useState([]);
+  const [loadingClinic, setLoadingClinic] = useState(false);
+  const [loadingCheckup, setLoadingCheckup] = useState(false);
   const [editingAdmin, setEditingAdmin] = useState(null);
   const { showToast, ToastContainer } = useToast();
 
@@ -78,6 +82,15 @@ export default function Settings() {
       setClinics(data);
     } catch (err) {
       showToast(err.message || 'فشل جلب العيادات', 'error');
+    }
+  }, [showToast]);
+
+  const loadCheckupTypes = useCallback(async () => {
+    try {
+      const data = await api('/checkup-types');
+      setCheckupTypes(data);
+    } catch (err) {
+      showToast(err.message || 'فشل جلب أنواع الكشف', 'error');
     }
   }, [showToast]);
 
@@ -92,12 +105,14 @@ export default function Settings() {
 
   useEffect(() => {
     loadClinics();
+    loadCheckupTypes();
     loadAdmins();
-  }, [loadClinics, loadAdmins]);
+  }, [loadClinics, loadCheckupTypes, loadAdmins]);
 
+  // إدارة العيادات
   const handleAddClinic = async (e) => {
     e.preventDefault();
-    setLoading(true);
+    setLoadingClinic(true);
     const form = new FormData(e.currentTarget);
     try {
       await api('/clinics', {
@@ -110,10 +125,42 @@ export default function Settings() {
     } catch (err) {
       showToast(err.message || 'تعذر إضافة العيادة', 'error');
     } finally {
-      setLoading(false);
+      setLoadingClinic(false);
     }
   };
 
+  // إدارة أنواع الكشف (الاسم فقط)
+  const handleAddCheckupType = async (e) => {
+    e.preventDefault();
+    setLoadingCheckup(true);
+    const form = new FormData(e.currentTarget);
+    try {
+      await api('/checkup-types', {
+        method: 'POST',
+        body: JSON.stringify(Object.fromEntries(form))
+      });
+      e.target.reset();
+      showToast('تم إضافة نوع الكشف بنجاح');
+      loadCheckupTypes();
+    } catch (err) {
+      showToast(err.message || 'تعذر إضافة نوع الكشف', 'error');
+    } finally {
+      setLoadingCheckup(false);
+    }
+  };
+
+  const handleDeleteCheckupType = async (id, name) => {
+    if (!window.confirm(`هل أنت متأكد من حذف نوع الكشف (${name})؟`)) return;
+    try {
+      await api(`/checkup-types/${id}`, { method: 'DELETE' });
+      showToast('تم حذف نوع الكشف بنجاح');
+      loadCheckupTypes();
+    } catch (err) {
+      showToast(err.message || 'تعذر حذف نوع الكشف', 'error');
+    }
+  };
+
+  // إدارة المشرفين
   const handleAddAdmin = async (e) => {
     e.preventDefault();
     const form = new FormData(e.currentTarget);
@@ -152,8 +199,13 @@ export default function Settings() {
 
   const handleDeleteAdmin = async (admin) => {
     if (admin.username === 'drahmed' || !window.confirm(`هل تريد حذف حساب ${admin.name}؟`)) return;
-    try { await api(`/admins/${admin._id}`, { method: 'DELETE' }); showToast('تم حذف حساب المشرف.'); loadAdmins(); }
-    catch (err) { showToast(err.message || 'تعذر حذف الحساب', 'error'); }
+    try { 
+      await api(`/admins/${admin._id}`, { method: 'DELETE' }); 
+      showToast('تم حذف حساب المشرف.'); 
+      loadAdmins(); 
+    } catch (err) { 
+      showToast(err.message || 'تعذر حذف الحساب', 'error'); 
+    }
   };
 
   return (
@@ -177,16 +229,16 @@ export default function Settings() {
                 <Sparkles className="h-3.5 w-3.5 text-sky-600" /> النظام الطبي الذكي
               </div>
               <h1 className="mt-2 text-2xl font-black text-slate-900 md:text-3xl">
-                إدارة المراكز والعيادات والصلاحيات
+                إدارة المراكز والخدمات الطبية والصلاحيات
               </h1>
               <p className="mt-1 text-sm text-slate-500">
-                لوحة التحكم المركزية بالصلاحيات الطبية والسحابية
+                لوحة التحكم المركزية بالفروع، أنواع الكشوفات، وحسابات الإدارة
               </p>
             </div>
           </div>
         </motion.header>
 
-        {/* Add Clinic Section */}
+        {/* ================= 1. قسم الفروع والعيادات ================= */}
         <motion.section
           initial={{ opacity: 0, y: 15 }}
           animate={{ opacity: 1, y: 0 }}
@@ -239,10 +291,10 @@ export default function Settings() {
               whileHover={{ scale: 1.01 }}
               whileTap={{ scale: 0.99 }}
               type="submit"
-              disabled={loading}
-              className="flex items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-sky-600 from-sky-600 to-cyan-400 py-3.5 font-bold text-white shadow-md shadow-blue-900/15 transition-all hover:brightness-105 md:col-span-2 lg:col-span-4"
+              disabled={loadingClinic}
+              className="flex items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-sky-600 to-cyan-500 py-3.5 font-bold text-white shadow-md shadow-blue-900/15 transition-all hover:brightness-105 md:col-span-2 lg:col-span-4"
             >
-              {loading ? (
+              {loadingClinic ? (
                 <Loader2 className="h-5 w-5 animate-spin text-white" />
               ) : (
                 <>
@@ -254,7 +306,7 @@ export default function Settings() {
           </form>
         </motion.section>
 
-        {/* Clinics Grid */}
+        {/* كروت العيادات */}
         <div>
           <div className="mb-4 flex items-center justify-between">
             <h3 className="text-xs font-bold tracking-widest text-slate-400 uppercase">
@@ -267,11 +319,7 @@ export default function Settings() {
             animate="show"
             variants={{
               hidden: {},
-              show: {
-                transition: {
-                  staggerChildren: 0.08
-                }
-              }
+              show: { transition: { staggerChildren: 0.08 } }
             }}
           >
             {clinics.map((clinic) => (
@@ -314,7 +362,96 @@ export default function Settings() {
           </motion.div>
         </div>
 
-        {/* Admins Management */}
+        {/* ================= 2. قسم أنواع الكشف (الاسم فقط) ================= */}
+        <motion.section
+          initial={{ opacity: 0, y: 15 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.4, delay: 0.15 }}
+          className="rounded-3xl border border-sky-100 bg-white p-6 shadow-sm"
+        >
+          <div className="mb-5 flex items-center gap-2.5 font-bold text-slate-800">
+            <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-sky-50 text-sky-700 border border-sky-100">
+              <Activity className="h-4 w-4" />
+            </div>
+            <span>إضافة نوع كشف طبي جديد</span>
+          </div>
+
+          <form onSubmit={handleAddCheckupType} className="flex flex-col gap-3 sm:flex-row">
+            <div className="relative flex-1">
+              <Stethoscope className="absolute right-3.5 top-3.5 h-4 w-4 text-sky-700/50" />
+              <input
+                required
+                name="name"
+                placeholder="نوع الكشف (مثال: كشف عام، استشارة، كشف مستعجل، متابعة)"
+                className="w-full rounded-2xl border border-slate-200 bg-slate-50/60 py-3 pr-10 pl-4 text-sm text-slate-800 placeholder-slate-400 outline-none transition-all focus:border-sky-600 focus:bg-white focus:ring-2 focus:ring-sky-100"
+              />
+            </div>
+
+            <motion.button
+              whileHover={{ scale: 1.01 }}
+              whileTap={{ scale: 0.99 }}
+              type="submit"
+              disabled={loadingCheckup}
+              className="flex items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-sky-600 to-cyan-500 px-6 py-3.5 font-bold text-white shadow-md shadow-blue-900/15 transition-all hover:brightness-105"
+            >
+              {loadingCheckup ? (
+                <Loader2 className="h-5 w-5 animate-spin text-white" />
+              ) : (
+                <>
+                  <span>إضافة الكشف</span>
+                  <Plus className="h-4 w-4" />
+                </>
+              )}
+            </motion.button>
+          </form>
+        </motion.section>
+
+        {/* كروت أنواع الكشف */}
+        <div>
+          <div className="mb-4 flex items-center justify-between">
+            <h3 className="text-xs font-bold tracking-widest text-slate-400 uppercase">
+              أنواع الكشف المسجلة ({checkupTypes.length})
+            </h3>
+          </div>
+          <motion.div 
+            className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4"
+            initial="hidden"
+            animate="show"
+            variants={{
+              hidden: {},
+              show: { transition: { staggerChildren: 0.06 } }
+            }}
+          >
+            {checkupTypes.map((type) => (
+              <motion.div
+                key={type._id}
+                variants={{
+                  hidden: { opacity: 0, y: 15 },
+                  show: { opacity: 1, y: 0 }
+                }}
+                whileHover={{ y: -3, transition: { duration: 0.2 } }}
+                className="group flex items-center justify-between rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm transition-all hover:border-sky-300 hover:shadow-md"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-sky-100 bg-sky-50 text-sky-700 transition-colors group-hover:bg-sky-600 group-hover:text-white">
+                    <Activity className="h-4 w-4" />
+                  </div>
+                  <span className="font-bold text-slate-800">{type.name}</span>
+                </div>
+
+                <button
+                  onClick={() => handleDeleteCheckupType(type._id, type.name)}
+                  className="rounded-lg p-2 text-slate-300 transition-colors hover:bg-rose-50 hover:text-rose-500"
+                  title="حذف النوع"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </button>
+              </motion.div>
+            ))}
+          </motion.div>
+        </div>
+
+        {/* ================= 3. قسم إدارة المشرفين ================= */}
         <motion.section
           initial={{ opacity: 0, y: 15 }}
           animate={{ opacity: 1, y: 0 }}
@@ -355,7 +492,7 @@ export default function Settings() {
               whileHover={{ scale: 1.01 }}
               whileTap={{ scale: 0.99 }}
               type="submit"
-              className="flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-sky-600 to-cyan-400 px-4 py-2.5 text-sm font-bold text-white shadow-sm transition-all hover:brightness-105"
+              className="flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-sky-600 to-cyan-500 px-4 py-2.5 text-sm font-bold text-white shadow-sm transition-all hover:brightness-105"
             >
               <UserPlus className="h-4 w-4" />
               <span>إضافة مشرف</span>
@@ -374,22 +511,31 @@ export default function Settings() {
                     <div className="text-xs text-slate-400">@{admin.username}</div>
                   </div>
                 </div>
-                <motion.button
-                  whileHover={{ scale: 1.05 }}
-                  whileTap={{ scale: 0.95 }}
-                  onClick={() => setEditingAdmin({ ...admin, password: '' })}
-                  className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 transition-all hover:border-sky-600 hover:text-sky-700"
-                >
-                  <Pencil className="h-3 w-3" />
-                  <span>تعديل</span>
-                </motion.button>
-                {admin.username !== 'drahmed' && <button onClick={() => handleDeleteAdmin(admin)} className="mr-2 rounded-xl border border-rose-100 bg-rose-50 px-3 py-1.5 text-xs font-semibold text-rose-600 hover:bg-rose-100">حذف</button>}
+                <div className="flex items-center gap-2">
+                  <motion.button
+                    whileHover={{ scale: 1.05 }}
+                    whileTap={{ scale: 0.95 }}
+                    onClick={() => setEditingAdmin({ ...admin, password: '' })}
+                    className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 transition-all hover:border-sky-600 hover:text-sky-700"
+                  >
+                    <Pencil className="h-3 w-3" />
+                    <span>تعديل</span>
+                  </motion.button>
+                  {admin.username !== 'drahmed' && (
+                    <button 
+                      onClick={() => handleDeleteAdmin(admin)} 
+                      className="rounded-xl border border-rose-100 bg-rose-50 px-3 py-1.5 text-xs font-semibold text-rose-600 hover:bg-rose-100"
+                    >
+                      حذف
+                    </button>
+                  )}
+                </div>
               </div>
             ))}
           </div>
         </motion.section>
 
-        {/* Edit Modal */}
+        {/* Edit Admin Modal */}
         <AnimatePresence>
           {editingAdmin && (
             <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -451,7 +597,7 @@ export default function Settings() {
                       whileHover={{ scale: 1.01 }}
                       whileTap={{ scale: 0.99 }}
                       type="submit"
-                      className="flex-1 rounded-xl bg-gradient-to-r from-sky-600 to-cyan-400 py-2.5 text-sm font-bold text-white shadow-sm transition-all hover:brightness-105"
+                      className="flex-1 rounded-xl bg-gradient-to-r from-sky-600 to-cyan-500 py-2.5 text-sm font-bold text-white shadow-sm transition-all hover:brightness-105"
                     >
                       حفظ التعديلات
                     </motion.button>

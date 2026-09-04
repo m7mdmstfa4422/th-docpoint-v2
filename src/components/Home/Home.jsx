@@ -1,116 +1,23 @@
-import { useContext } from 'react';
+import { useContext, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { motion } from 'framer-motion';
-import { ArrowLeft, CalendarPlus, ShieldCheck, Sparkles, Stethoscope, Users } from 'lucide-react';
+import { CalendarDays, ChevronLeft, Clock3, Plus, UsersRound } from 'lucide-react';
 import { AuthContext } from '../../AuthProvider';
+import { api } from '../../api';
 
 export default function Home() {
   const { admin } = useContext(AuthContext);
-  const today = new Intl.DateTimeFormat('ar-EG', { 
-    weekday: 'long', 
-    year: 'numeric', 
-    month: 'long', 
-    day: 'numeric' 
-  }).format(new Date());
+  const [appointments, setAppointments] = useState([]);
+  const [patientCount, setPatientCount] = useState(0);
+  const [loading, setLoading] = useState(true);
 
-  return (
-    <section className="relative min-h-[calc(100vh-10rem)] overflow-hidden rounded-[2.5rem] border border-sky-100 bg-[#F8FAFC] p-6 text-slate-800 shadow-sm md:p-12" dir="rtl">
-      {/* Animated Light Auras */}
-      <motion.div 
-        animate={{ x: [0, 80, 0], y: [0, 50, 0], scale: [1, 1.2, 1] }} 
-        transition={{ duration: 15, repeat: Infinity, ease: 'easeInOut' }} 
-        className="absolute -top-32 -right-24 h-96 w-96 rounded-full bg-sky-200/60 blur-3xl" 
-      />
-      <motion.div 
-        animate={{ x: [0, -90, 0], y: [0, -40, 0], scale: [1, 1.25, 1] }} 
-        transition={{ duration: 18, repeat: Infinity, ease: 'easeInOut' }} 
-        className="absolute -bottom-40 -left-20 h-[28rem] w-[28rem] rounded-full bg-cyan-200/50 blur-3xl" 
-      />
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_30%,rgba(14,165,233,0.06),transparent_40%)]" />
+  useEffect(() => { (async () => { try {
+    const [nextAppointments, patients] = await Promise.all([api('/appointments', { showLoading: false }), api('/patients', { showLoading: false })]);
+    setAppointments(nextAppointments); setPatientCount(patients.length);
+  } finally { setLoading(false); } })(); }, []);
 
-      {/* Decorative Watermark Icon */}
-      <Stethoscope className="pointer-events-none absolute -bottom-10 left-10 h-72 w-72 -rotate-12 text-sky-900/[0.03]" />
-
-      <div className="relative z-10 flex min-h-[70vh] flex-col justify-between">
-        <div>
-          {/* Top Badge */}
-          <motion.div 
-            initial={{ opacity: 0, y: -15 }} 
-            animate={{ opacity: 1, y: 0 }} 
-            className="inline-flex items-center gap-2 rounded-full border border-sky-200 bg-white/80 px-4 py-2 text-xs font-semibold text-sky-800 shadow-sm backdrop-blur-xl"
-          >
-            <Sparkles size={15} className="text-sky-600" />
-            نظام عيادتي الطبي الذكي
-          </motion.div>
-
-          {/* Hero Welcome Text */}
-          <motion.div 
-            initial={{ opacity: 0, y: 20 }} 
-            animate={{ opacity: 1, y: 0 }} 
-            transition={{ delay: 0.15 }} 
-            className="mt-10 max-w-3xl"
-          >
-            <p className="text-sm font-semibold text-sky-700">{today}</p>
-            <h1 className="mt-3 text-4xl font-black leading-tight text-slate-900 md:text-6xl">
-              مرحبًا، {admin?.name || admin?.username}
-              <br />
-              <span className="bg-gradient-to-r from-sky-600 to-cyan-500 bg-clip-text text-transparent">
-                في عيادة د. أحمد الرفاعي
-              </span>
-            </h1>
-            <p className="mt-5 max-w-xl text-base leading-8 text-slate-600">
-              المنظومة السحابية الموحدة لإدارة المراجعين، متابعة الزيارات، وفحص تقارير الفروع بكل سلاسة واحترافية.
-            </p>
-          </motion.div>
-        </div>
-
-        {/* Quick Action Navigation Cards */}
-        <motion.div 
-          initial={{ opacity: 0, y: 25 }} 
-          animate={{ opacity: 1, y: 0 }} 
-          transition={{ delay: 0.3 }} 
-          className="grid gap-5 md:grid-cols-3"
-        >
-          <Link 
-            to="/register" 
-            className="group relative overflow-hidden rounded-3xl border border-sky-100 bg-white/80 p-6 shadow-sm backdrop-blur-xl transition-all duration-300 hover:-translate-y-1 hover:border-sky-300 hover:shadow-md"
-          >
-            <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-sky-100 bg-sky-50 text-sky-700 transition-colors group-hover:bg-sky-600 group-hover:text-white">
-              <CalendarPlus size={20} />
-            </div>
-            <b className="mt-4 block text-base font-bold text-slate-900">تسجيل مريض جديد</b>
-            <span className="mt-1 flex items-center gap-1 text-xs font-semibold text-sky-700">
-              فتح ملف طبي <ArrowLeft size={14} className="transition-transform group-hover:-translate-x-1" />
-            </span>
-            <div className="absolute inset-x-0 bottom-0 h-1 bg-gradient-to-r from-sky-600 to-cyan-400 opacity-0 transition-opacity group-hover:opacity-100" />
-          </Link>
-
-          <Link 
-            to="/search" 
-            className="group relative overflow-hidden rounded-3xl border border-sky-100 bg-white/80 p-6 shadow-sm backdrop-blur-xl transition-all duration-300 hover:-translate-y-1 hover:border-sky-300 hover:shadow-md"
-          >
-            <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-sky-100 bg-sky-50 text-sky-700 transition-colors group-hover:bg-sky-600 group-hover:text-white">
-              <Users size={20} />
-            </div>
-            <b className="mt-4 block text-base font-bold text-slate-900">السجلات الطبية</b>
-            <span className="mt-1 flex items-center gap-1 text-xs font-semibold text-sky-700">
-              بحث ومتابعة الحالات <ArrowLeft size={14} className="transition-transform group-hover:-translate-x-1" />
-            </span>
-            <div className="absolute inset-x-0 bottom-0 h-1 bg-gradient-to-r from-sky-600 to-cyan-400 opacity-0 transition-opacity group-hover:opacity-100" />
-          </Link>
-
-          <div className="relative overflow-hidden rounded-3xl border border-sky-100 bg-white/80 p-6 shadow-sm backdrop-blur-xl">
-            <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-sky-100 bg-sky-50 text-sky-700">
-              <ShieldCheck size={20} />
-            </div>
-            <b className="mt-4 block text-base font-bold text-slate-900">جلسة محمية وموثقة</b>
-            <span className="mt-1 block text-xs text-slate-500 font-medium">
-              متصل كـ: <b className="text-slate-700">@{admin?.username}</b>
-            </span>
-            <div className="absolute inset-x-0 bottom-0 h-1 bg-gradient-to-r from-sky-600 to-indigo-900 opacity-20" />
-          </div>
-        </motion.div>
-      </div>
-    </section>
-  );
+  return <section className="min-h-[calc(100vh-5rem)] bg-[#f5f9fc] p-4 md:p-8" dir="rtl"><div className="mx-auto max-w-7xl space-y-6">
+    <header className="relative overflow-hidden rounded-[2rem] bg-slate-950 p-7 text-white shadow-xl md:p-10"><div className="absolute -left-20 -top-24 h-80 w-80 rounded-full bg-cyan-500/25 blur-3xl"/><div className="relative flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between"><div><span className="rounded-full border border-cyan-300/30 bg-cyan-400/10 px-3 py-1 text-xs font-bold text-cyan-200">DOCPOINT · لوحة التشغيل</span><h1 className="mt-5 text-3xl font-black md:text-4xl">أهلاً {admin?.name || admin?.username}</h1><p className="mt-3 max-w-xl text-sm leading-7 text-slate-300">نظرة سريعة على نشاط العيادة، المرضى والحجوزات القادمة خلال الأسبوع.</p></div><Link to="/appointments" className="inline-flex items-center justify-center gap-2 rounded-2xl bg-cyan-400 px-5 py-3 text-sm font-black text-slate-950"><CalendarDays size={18}/>إدارة الحجوزات<ChevronLeft size={17}/></Link></div></header>
+    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3"><article className="rounded-3xl border border-sky-100 bg-white p-5 shadow-sm"><div className="flex items-center justify-between"><div><p className="text-xs font-bold text-slate-500">مرضى مسجلون</p><b className="mt-2 block text-3xl text-slate-900">{patientCount}</b></div><div className="rounded-2xl bg-sky-50 p-3 text-sky-700"><UsersRound size={24}/></div></div><Link to="/search" className="mt-5 flex items-center gap-1 text-xs font-bold text-sky-700">عرض سجل المرضى <ChevronLeft size={14}/></Link></article><article className="rounded-3xl border border-cyan-100 bg-white p-5 shadow-sm"><div className="flex items-center justify-between"><div><p className="text-xs font-bold text-slate-500">حجوزات الأسبوع القادم</p><b className="mt-2 block text-3xl text-slate-900">{appointments.length}</b></div><div className="rounded-2xl bg-cyan-50 p-3 text-cyan-700"><CalendarDays size={24}/></div></div><Link to="/appointments" className="mt-5 flex items-center gap-1 text-xs font-bold text-cyan-700">فتح قائمة الحجوزات <ChevronLeft size={14}/></Link></article><Link to="/register" className="group rounded-3xl bg-gradient-to-br from-sky-600 to-cyan-500 p-5 text-white shadow-md"><Plus size={25}/><b className="mt-7 block text-lg">إضافة مريض جديد</b><span className="mt-1 block text-xs text-sky-100">إنشاء ملف طبي وربطه بالعيادة</span><span className="mt-5 flex items-center gap-1 text-xs font-bold">فتح التسجيل <ChevronLeft size={14}/></span></Link></div>
+    <section className="overflow-hidden rounded-3xl border border-sky-100 bg-white shadow-sm"><div className="flex items-center justify-between border-b border-slate-100 p-5"><div><h2 className="font-black text-slate-900">المواعيد القادمة</h2><p className="mt-1 text-xs text-slate-500">كل الحجوزات المحفوظة خلال الأيام السبعة القادمة</p></div><Clock3 className="text-sky-600" size={22}/></div><div className="divide-y divide-slate-100">{loading ? <p className="p-8 text-center text-sm text-slate-400">جارٍ تحميل بيانات الأسبوع...</p> : appointments.length ? appointments.slice(0, 6).map((item) => <div key={item._id} className="flex items-center gap-3 p-4"><div className="grid h-10 w-10 place-items-center rounded-xl bg-sky-50 text-sky-700"><CalendarDays size={18}/></div><div className="flex-1"><b className="text-sm text-slate-900">{item.patient?.fullName || 'مريض محذوف'}</b><p className="mt-1 text-xs text-slate-500"><b className="text-sky-700">{new Date(item.appointmentAt).toLocaleDateString('ar-EG', { weekday: 'long' })}</b> · {item.patient?.phone} · {new Date(item.appointmentAt).toLocaleString('ar-EG', { dateStyle: 'medium', timeStyle: 'short' })}</p></div></div>) : <div className="p-10 text-center"><CalendarDays className="mx-auto text-slate-300" size={30}/><p className="mt-3 text-sm text-slate-400">لا توجد حجوزات خلال الأسبوع القادم.</p><Link to="/appointments" className="mt-3 inline-block text-xs font-bold text-sky-700">أنشئ أول حجز</Link></div>}</div></section>
+  </div></section>;
 }

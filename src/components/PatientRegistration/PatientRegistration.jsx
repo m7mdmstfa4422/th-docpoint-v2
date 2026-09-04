@@ -202,6 +202,9 @@ export default function PatientRegistration() {
       showToast('✨ تم تسجيل بيانات المريض بنجاح وفق المعايير');
     } catch (error) {
       if (error.field === 'nationalId') setErrors((prev) => ({ ...prev, nationalId: error.message }));
+      if (error.field === 'patientDuplicate') {
+        setErrors((prev) => ({ ...prev, fullName: error.message, phone: error.message }));
+      }
       showToast(error.message || 'تعذر حفظ البيانات. تأكد من تشغيل الخادم.', 'error');
     } finally {
       setLoading(false);
@@ -351,18 +354,7 @@ export default function PatientRegistration() {
                 </div>
               </Field>
 
-              <Field label="قيمة الكشف الأولي (ج)" icon={Wallet}>
-                <input 
-                  required 
-                  name="initialFee" 
-                  value={form.initialFee} 
-                  onChange={update} 
-                  type="number" 
-                  min="0" 
-                  placeholder="0" 
-                  className={inputClass(false)} 
-                />
-              </Field>
+             
             </div>
           </section>
 

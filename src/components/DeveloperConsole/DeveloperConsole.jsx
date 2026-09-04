@@ -37,11 +37,14 @@ export default function DeveloperConsole() {
     load(); 
   }, []);
 
-  const action = async (path, successMsg) => {
+  const action = async (path, successMsg, body) => {
     setLoading(true);
     setMessage({ text: '', type: '' });
     try {
-      const response = await api(path, { method: 'POST' });
+      const response = await api(path, {
+        method: 'POST',
+        ...(body ? { body: JSON.stringify(body) } : {}),
+      });
       if (response.code) setCode(response.code);
       setMessage({ text: successMsg, type: 'success' });
       await load();
@@ -174,18 +177,28 @@ export default function DeveloperConsole() {
               </div>
               <h3 className="mt-4 font-bold text-slate-900">تمديد التفعيل</h3>
               <p className="mt-1 text-xs text-slate-500 leading-relaxed">
-                تفعيل الاشتراك لمدة ستة أشهر من لحظة التفعيل.
+                اختر مدة التمديد. يُضاف الوقت إلى تاريخ الانتهاء الحالي إن كان الاشتراك نشطاً.
               </p>
             </div>
 
-            <button
-              onClick={() => action('/developer/subscription/activate', 'تم تفعيل وتمديد الاشتراك بنجاح لمدة ستة أشهر.')}
-              disabled={loading}
-              className="mt-6 flex w-full items-center justify-center gap-2 rounded-2xl bg-emerald-600 py-3 text-xs font-bold text-white shadow-md shadow-emerald-600/20 transition-all hover:bg-emerald-700 active:scale-[0.98] disabled:opacity-50"
-            >
-              <CalendarCheck2 size={16} />
-              <span>تفعيل لمدة 6 أشهر</span>
-            </button>
+            <div className="mt-6 grid grid-cols-2 gap-2">
+              {[
+                { months: 1, label: 'شهر' },
+                { months: 3, label: '3 شهور' },
+                { months: 6, label: '6 شهور' },
+                { months: 12, label: 'سنة' },
+              ].map(({ months, label }) => (
+                <button
+                  key={months}
+                  onClick={() => action('/developer/subscription/activate', `تم تفعيل وتمديد الاشتراك بنجاح لمدة ${label}.`, { months })}
+                  disabled={loading}
+                  className="flex items-center justify-center gap-1.5 rounded-2xl bg-emerald-600 px-2 py-3 text-xs font-bold text-white shadow-md shadow-emerald-600/20 transition-all hover:bg-emerald-700 active:scale-[0.98] disabled:opacity-50"
+                >
+                  <CalendarCheck2 size={15} />
+                  <span>{label}</span>
+                </button>
+              ))}
+            </div>
           </motion.div>
 
           {/* بطاقة تعطيل وإيقاف النظام */}

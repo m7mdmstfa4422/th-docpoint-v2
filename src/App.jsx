@@ -18,6 +18,7 @@ import AuthProvider, { AuthContext } from './AuthProvider';
 import SubscriptionProvider, { SubscriptionContext } from './SubscriptionProvider';
 import SubscriptionRenewal from './components/SubscriptionRenewal/SubscriptionRenewal';
 import DeveloperConsole from './components/DeveloperConsole/DeveloperConsole';
+import Appointments from './components/Appointments/Appointments';
 
 const UnderDevelopment = () => (
   <div className="grid min-h-[45vh] place-items-center rounded-3xl border border-dashed border-slate-300 bg-white p-8 text-center">
@@ -52,6 +53,7 @@ function AnimatedRoutes() {
           <Route path="/developer" element={admin?.role === 'developer' ? <DeveloperConsole /> : <Navigate to="/" replace />} />
           <Route path="/register" element={isAuthenticated ? <PatientRegistration /> : <Navigate to="/Login" replace />} />
           <Route path="/search" element={isAuthenticated ? <PatientSearch /> : <Navigate to="/Login" replace />} />
+          <Route path="/appointments" element={isAuthenticated ? <Appointments /> : <Navigate to="/Login" replace />} />
           <Route path="/finance" element={isDoctor ? <FinancialDashboard /> : <Navigate to="/register" replace />} />
           <Route path="/patient-profile/:id" element={isAuthenticated ? <PatientProfile /> : <Navigate to="/Login" replace />} />
           <Route path="/operations" element={isAuthenticated ? <UnderDevelopment /> : <Navigate to="/Login" replace />} />
