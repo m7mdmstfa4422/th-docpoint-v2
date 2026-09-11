@@ -22,11 +22,17 @@ const port = process.env.PORT || 5000;
 app.use(cors()); 
 app.use(express.json());
 
-const token = (admin) => jwt.sign(
-  { id: admin._id, username: admin.username, name: admin.name, role: admin.role }, 
-  process.env.JWT_SECRET, 
-  { expiresIn: '12h' }
-);
+const token = (admin) => {
+  const secret = process.env.JWT_SECRET;
+  if (!secret || !secret.trim()) {
+    throw new Error('JWT_SECRET is not properly configured');
+  }
+  return jwt.sign(
+    { id: admin._id, username: admin.username, name: admin.name, role: admin.role },
+    secret.trim(), // Trim whitespace from JWT_SECRET
+    { expiresIn: '12h' }
+  );
+};
 
 const auth = (req, res, next) => {
   try {
@@ -50,16 +56,64 @@ const developer = (req, res, next) =>
     : res.status(403).json({ message: 'هذه الصفحة مخصصة للمطور فقط.' });
 
 // Auth Routes
-app.post('/api/auth/login', async (req, res, next) => { 
-  try { 
-    const admin = await Admin.findOne({ username: req.body.username?.toLowerCase() }); 
-    if (!admin || !(await bcrypt.compare(req.body.password || '', admin.passwordHash))) {
-      return res.status(401).json({ message: 'اسم المستخدم أو كلمة المرور غير صحيحة.' }); 
+app.post('/api/auth/login', async (req, res, next) => {
+  try {
+    // Validate input
+    if (!req.body.username || !req.body.password) {
+      return res.status(400).json({ message: 'يرجى إدخال اسم المستخدم وكلمة المرور.' });
     }
-    res.json({ token: token(admin), admin: { username: admin.username, name: admin.name, role: admin.role } }); 
-  } catch (error) { 
-    next(error); 
-  } 
+
+    // Check database connection
+    if (mongoose.connection.readyState !== 1) {
+      console.error('Login Error: Database not connected. Connection state:', mongoose.connection.readyState);
+      return res.status(503).json({ message: 'قاعدة البيانات غير متصلة. يرجى المحاولة لاحقاً.' });
+    }
+
+    // Find admin user
+    const admin = await Admin.findOne({ username: req.body.username?.toLowerCase() });
+
+    if (!admin) {
+      console.log('Login attempt for non-existent user:', req.body.username);
+      return res.status(401).json({ message: 'اسم المستخدم أو كلمة المرور غير صحيحة.' });
+    }
+
+    // Verify passwordHash exists
+    if (!admin.passwordHash) {
+      console.error('Login Error: User exists but passwordHash is missing for:', admin.username);
+      return res.status(500).json({ message: 'خطأ في بيانات الحساب. يرجى الاتصال بالدعم الفني.' });
+    }
+
+    // Compare password
+    const isValidPassword = await bcrypt.compare(req.body.password || '', admin.passwordHash);
+    if (!isValidPassword) {
+      console.log('Login attempt with incorrect password for user:', req.body.username);
+      return res.status(401).json({ message: 'اسم المستخدم أو كلمة المرور غير صحيحة.' });
+    }
+
+    // Verify JWT_SECRET exists
+    if (!process.env.JWT_SECRET) {
+      console.error('Login Error: JWT_SECRET is not defined in environment variables');
+      return res.status(500).json({ message: 'خطأ في تكوين الخادم.' });
+    }
+
+    // Generate token and respond
+    const authToken = token(admin);
+    res.json({
+      token: authToken,
+      admin: {
+        username: admin.username,
+        name: admin.name,
+        role: admin.role
+      }
+    });
+  } catch (error) {
+    console.error('Login Error:', error);
+    console.error('Stack:', error.stack);
+    res.status(500).json({
+      message: 'حدث خطأ أثناء تسجيل الدخول.',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
 });
 
 app.get('/api/auth/me', auth, (req, res) => res.json(req.admin)); 
