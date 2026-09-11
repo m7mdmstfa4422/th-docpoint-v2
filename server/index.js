@@ -5,13 +5,16 @@ import mongoose from 'mongoose';
 import bcrypt from 'bcryptjs'; 
 import jwt from 'jsonwebtoken';
 
-import Patient from './models/Patient.js'; 
-import Clinic from './models/Clinic.js'; 
-import Visit from './models/Visit.js'; 
-import Admin from './models/Admin.js'; 
+import Patient from './models/Patient.js';
+import Clinic from './models/Clinic.js';
+import Visit from './models/Visit.js';
+import Admin from './models/Admin.js';
 import Subscription from './models/Subscription.js';
 import MedicalExamination from './models/MedicalExamination.js';
 import Appointment from './models/Appointments.js';
+import ExternalDebt from './models/ExternalDebt.js';
+import Notification from './models/Notification.js';
+import { createNotification, addSseClient, removeSseClient } from './utils/notifications.js';
 
 const app = express(); 
 const port = process.env.PORT || 5000;
@@ -25,15 +28,15 @@ const token = (admin) => jwt.sign(
   { expiresIn: '12h' }
 );
 
-const auth = (req, res, next) => { 
-  try { 
-    const authHeader = req.headers.authorization;
-    if (!authHeader) return res.status(401).json({ message: 'يرجى تسجيل الدخول أولاً.' });
-    req.admin = jwt.verify(authHeader.replace('Bearer ', ''), process.env.JWT_SECRET); 
-    next(); 
-  } catch { 
-    res.status(401).json({ message: 'جلسة الدخول غير صالحة أو منتهية.' }); 
-  } 
+const auth = (req, res, next) => {
+  try {
+    const rawToken = req.headers.authorization?.replace('Bearer ', '') || req.query.token;
+    if (!rawToken) return res.status(401).json({ message: 'يرجى تسجيل الدخول أولاً.' });
+    req.admin = jwt.verify(rawToken, process.env.JWT_SECRET);
+    next();
+  } catch {
+    res.status(401).json({ message: 'جلسة الدخول غير صالحة أو منتهية.' });
+  }
 };
 
 const doctor = (req, res, next) => 
@@ -66,7 +69,12 @@ app.get('/api/health', (_req, res) => res.json({ connected: mongoose.connection.
 app.get('/api/subscription', auth, async (_req, res, next) => { 
   try { 
     const subscription = await Subscription.findOne(); 
-    res.json({ expiresAt: subscription?.expiresAt, active: Boolean(subscription && subscription.expiresAt > new Date()) }); 
+    res.json({ 
+      expiresAt: subscription?.expiresAt, 
+      active: Boolean(subscription && subscription.expiresAt > new Date()),
+      createdAt: subscription?.createdAt,
+      renewedAt: subscription?.renewedAt
+    }); 
   } catch (error) { 
     next(error); 
   } 
@@ -82,7 +90,14 @@ app.post('/api/subscription/renew', auth, async (req, res, next) => {
     subscription.expiresAt = new Date(new Date().setMonth(new Date().getMonth() + 6)); 
     subscription.renewedAt = new Date(); 
     subscription.renewalCodeHash = await bcrypt.hash(newCode, 12); 
-    await subscription.save(); 
+    await subscription.save();
+    createNotification({
+      title: 'تجديد اشتراك العيادة',
+      message: `تم تجديد اشتراك العيادة بنجاح لمدة 6 أشهر حتى ${new Date(subscription.expiresAt).toLocaleDateString('ar-EG')}.`,
+      type: 'system',
+      link: '/settings',
+      createdBy: req.admin.id,
+    }).catch((err) => console.error('Notification error:', err));
     res.json({ expiresAt: subscription.expiresAt, nextCode: newCode }); 
   } catch (error) { 
     next(error); 
@@ -112,7 +127,14 @@ app.post('/api/developer/subscription/activate', auth, developer, async (req, re
     expiresAt.setMonth(expiresAt.getMonth() + months);
     subscription.expiresAt = expiresAt;
     subscription.renewedAt = now; 
-    await subscription.save(); 
+    await subscription.save();
+    createNotification({
+      title: 'تفعيل اشتراك العيادة',
+      message: `تم تفعيل اشتراك العيادة لمدة ${months} شهر بنجاح حتى ${new Date(subscription.expiresAt).toLocaleDateString('ar-EG')}.`,
+      type: 'system',
+      link: '/settings',
+      createdBy: req.admin.id,
+    }).catch((err) => console.error('Notification error:', err));
     res.json({ expiresAt: subscription.expiresAt, active: true, months }); 
   } catch (error) { 
     next(error); 
@@ -295,17 +317,24 @@ app.post('/api/patients', auth, async (req, res, next) => {
     }
     const patient = await Patient.create({ ...data, fullName, phone, createdBy: req.admin.id }); 
     if (Number(initialFee) > 0) {
-      await Visit.create({ 
-        patient: patient._id, 
-        clinic: patient.clinic, 
-        title: 'كشف أولي', 
+      await Visit.create({
+        patient: patient._id,
+        clinic: patient.clinic,
+        title: 'كشف أولي',
         cost: Number(initialFee),
-        amount: Number(initialFee), 
-        notes: 'كشف وتسجيل أولي.', 
+        amount: Number(initialFee),
+        notes: 'كشف وتسجيل أولي.',
         financialNotes: 'سداد رسوم الكشف الأولي عند التسجيل.',
-        createdBy: req.admin.id 
-      }); 
+        createdBy: req.admin.id
+      });
     }
+    createNotification({
+      title: 'تسجيل مريض جديد',
+      message: `تم تسجيل المريض "${patient.fullName}" في النظام${Number(initialFee) > 0 ? ` مع كشف أولي بقيمة ${initialFee} ج` : ''}.`,
+      type: 'patient',
+      link: `/patient-profile/${patient._id}`,
+      createdBy: req.admin.id,
+    }).catch((err) => console.error('Notification error:', err));
     res.status(201).json(patient); 
   } catch (error) { 
     next(error); 
@@ -361,28 +390,54 @@ app.post('/api/appointments', auth, async (req, res, next) => {
     if (Number.isNaN(date.getTime())) return res.status(400).json({ message: 'تاريخ الموعد غير صالح.' });
     const appointment = await Appointment.create({ patient: patient._id, appointmentAt: date, notes, createdBy: req.admin.id });
     await appointment.populate('patient', 'fullName phone nationalId clinic');
+
+    const apptTimeStr = date.toLocaleDateString('ar-EG', {
+      weekday: 'long',
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+    createNotification({
+      title: 'حجز موعد جديد',
+      message: `تم حجز موعد للمريض "${patient.fullName}" بتاريخ ${apptTimeStr}.`,
+      type: 'appointment',
+      link: '/appointments',
+      createdBy: req.admin.id,
+    }).catch((err) => console.error('Notification error:', err));
+
     res.status(201).json(appointment);
   } catch (error) { next(error); }
 });
 
 app.delete('/api/appointments/:id', auth, async (req, res, next) => {
   try {
-    const appointment = await Appointment.findByIdAndDelete(req.params.id);
+    const appointment = await Appointment.findByIdAndDelete(req.params.id).populate('patient', 'fullName');
     if (!appointment) return res.status(404).json({ message: 'الحجز غير موجود.' });
+
+    createNotification({
+      title: 'إلغاء حجز موعد',
+      message: `تم إلغاء موعد المريض "${appointment.patient?.fullName || 'غير محدد'}".`,
+      type: 'appointment',
+      link: '/appointments',
+      createdBy: req.admin.id,
+    }).catch((err) => console.error('Notification error:', err));
+
     res.json({ message: 'تم حذف الحجز نهائياً.' });
   } catch (error) { next(error); }
 });
 
 // Visits Routes
-app.post('/api/patients/:id/visits', auth, async (req, res, next) => { 
-  try { 
-    const patient = await Patient.findById(req.params.id); 
-    if (!patient) return res.status(404).json({ message: 'المريض غير موجود.' }); 
-    
+app.post('/api/patients/:id/visits', auth, async (req, res, next) => {
+  try {
+    const patient = await Patient.findById(req.params.id);
+    if (!patient) return res.status(404).json({ message: 'المريض غير موجود.' });
+
     const cost = Number(req.body.cost ?? req.body.amount ?? 0);
     const amount = Number(req.body.amount || 0);
 
-    const visit = await Visit.create({ 
+    const visit = await Visit.create({
       title: req.body.title,
       diagnosis: req.body.diagnosis || '',
       treatmentPlan: req.body.treatmentPlan || '',
@@ -393,13 +448,22 @@ app.post('/api/patients/:id/visits', auth, async (req, res, next) => {
       status: req.body.status || 'مكتمل',
       cost,
       amount,
-      patient: patient._id, 
-      createdBy: req.admin.id 
+      patient: patient._id,
+      createdBy: req.admin.id
     });
-    res.status(201).json(visit); 
-  } catch (error) { 
-    next(error); 
-  } 
+
+    createNotification({
+      title: 'تسجيل كشف جديد',
+      message: `تم تسجيل كشف (${visit.title}) للمريض "${patient.fullName}" بقيمة ${cost || amount} ج.`,
+      type: 'billing',
+      link: `/patient-profile/${patient._id}`,
+      createdBy: req.admin.id,
+    }).catch((err) => console.error('Notification error:', err));
+
+    res.status(201).json(visit);
+  } catch (error) {
+    next(error);
+  }
 });
 
 // مسار تعديل تفاصيل الكشف وفصل الملاحظات
@@ -475,6 +539,7 @@ app.post('/api/patients/:id/pay-debt', auth, async (req, res, next) => {
     const visits = await Visit.find({ patient: req.params.id }).sort({ visitDate: 1, createdAt: 1 });
     const today = new Date().toLocaleDateString('ar-EG');
     
+    const initialAmount = Number(req.body.amount) || 0;
     for (const v of visits) {
       const cost = Number(v.cost ?? v.amount ?? 0);
       const paid = Number(v.amount || 0);
@@ -482,13 +547,13 @@ app.post('/api/patients/:id/pay-debt', auth, async (req, res, next) => {
 
       if (remaining > 0 && payment > 0) {
         const payForThis = Math.min(remaining, payment);
-        
+
         v.amount = paid + payForThis;
 
         // يتم توثيق العملية حصرياً داخل ملاحظات المال دون لمس التشخيص
         const paymentEntry = `تم سداد ${payForThis} ج بتاريخ ${today}`;
-        v.financialNotes = v.financialNotes 
-          ? `${v.financialNotes} | ${paymentEntry}` 
+        v.financialNotes = v.financialNotes
+          ? `${v.financialNotes} | ${paymentEntry}`
           : paymentEntry;
 
         await v.save();
@@ -496,9 +561,279 @@ app.post('/api/patients/:id/pay-debt', auth, async (req, res, next) => {
       }
     }
 
+    Patient.findById(req.params.id).select('fullName').then((pat) => {
+      createNotification({
+        title: 'سداد مديونية مريض',
+        message: `تم سداد دفعة مالية بقيمة ${initialAmount} ج لحساب المريض "${pat?.fullName || 'غير محدد'}".`,
+        type: 'billing',
+        link: `/patient-profile/${req.params.id}`,
+        createdBy: req.admin.id,
+      }).catch((err) => console.error('Notification error:', err));
+    }).catch(() => {});
+
     res.json({ message: 'تم تسوية وتحديث الحسابات بنجاح.' });
   } catch (error) { 
     next(error); 
+  }
+});
+
+// ── استعلام مديونيات المرضى (المبالغ المتبقية على المرضى من الكشوفات) ──
+app.get('/api/debts/patients', auth, async (req, res, next) => {
+  try {
+    const search = req.query.search?.trim();
+
+    // جلب الكشوف التي فيها التكلفة أكبر من المدفوع
+    const visits = await Visit.find({
+      $expr: { $gt: [{ $ifNull: ['$cost', 0] }, { $ifNull: ['$amount', 0] }] }
+    })
+      .populate('patient', 'fullName phone nationalId age gender')
+      .populate('clinic', 'name')
+      .sort({ visitDate: -1, createdAt: -1 });
+
+    const patientMap = new Map();
+    let totalDebt = 0;
+
+    for (const v of visits) {
+      if (!v.patient) continue;
+      const cost = Number(v.cost || 0);
+      const paid = Number(v.amount || 0);
+      const remaining = Math.max(0, cost - paid);
+      if (remaining <= 0) continue;
+
+      const pid = String(v.patient._id);
+      if (!patientMap.has(pid)) {
+        patientMap.set(pid, {
+          patient: v.patient,
+          clinic: v.clinic,
+          totalCost: 0,
+          totalPaid: 0,
+          totalRemaining: 0,
+          lastVisitDate: v.visitDate || v.createdAt,
+          visits: []
+        });
+      }
+
+      const pData = patientMap.get(pid);
+      pData.totalCost += cost;
+      pData.totalPaid += paid;
+      pData.totalRemaining += remaining;
+      pData.visits.push({
+        _id: v._id,
+        title: v.title,
+        cost,
+        paid,
+        remaining,
+        visitDate: v.visitDate || v.createdAt,
+        financialNotes: v.financialNotes
+      });
+      totalDebt += remaining;
+    }
+
+    let result = Array.from(patientMap.values());
+
+    if (search) {
+      const s = search.toLowerCase();
+      result = result.filter(item => 
+        item.patient?.fullName?.toLowerCase().includes(s) ||
+        item.patient?.phone?.includes(s) ||
+        item.patient?.nationalId?.includes(s)
+      );
+    }
+
+    // فرز تنازلي حسب إجمالي المتبقي (الأعلى أولاً)
+    result.sort((a, b) => b.totalRemaining - a.totalRemaining);
+
+    res.json({
+      totalDebt,
+      patientCount: patientMap.size,
+      patients: result
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ── إحصائيات عامة لكافة الأموال والمديونيات الخارجية ──
+app.get('/api/debts/overview', auth, async (req, res, next) => {
+  try {
+    const visits = await Visit.find({
+      $expr: { $gt: [{ $ifNull: ['$cost', 0] }, { $ifNull: ['$amount', 0] }] }
+    });
+
+    let patientsDebt = 0;
+    const indebtedPatientIds = new Set();
+    for (const v of visits) {
+      const cost = Number(v.cost || 0);
+      const paid = Number(v.amount || 0);
+      const remaining = Math.max(0, cost - paid);
+      if (remaining > 0) {
+        patientsDebt += remaining;
+        if (v.patient) indebtedPatientIds.add(String(v.patient));
+      }
+    }
+
+    const externalDebts = await ExternalDebt.find();
+    let externalReceivables = 0;
+    let externalPayables = 0;
+
+    for (const d of externalDebts) {
+      const total = Number(d.totalAmount || 0);
+      const paid = Number(d.paidAmount || 0);
+      const remaining = Math.max(0, total - paid);
+
+      if (d.type === 'receivable') {
+        externalReceivables += remaining;
+      } else if (d.type === 'payable') {
+        externalPayables += remaining;
+      }
+    }
+
+    const totalOwedToDoctor = patientsDebt + externalReceivables;
+    const netPosition = totalOwedToDoctor - externalPayables;
+
+    res.json({
+      patientsDebt,
+      indebtedPatientsCount: indebtedPatientIds.size,
+      externalReceivables,
+      externalPayables,
+      totalOwedToDoctor,
+      netPosition,
+      externalCount: externalDebts.length
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ── مسارات الديون والالتزامات للجهات الخارجية ──
+app.get('/api/external-debts', auth, async (req, res, next) => {
+  try {
+    const { type, category, status, search } = req.query;
+    const query = {};
+    if (type) query.type = type;
+    if (category) query.category = category;
+    if (status) query.status = status;
+    if (search?.trim()) {
+      const s = search.trim();
+      query.$or = [
+        { title: { $regex: s, $options: 'i' } },
+        { debtorName: { $regex: s, $options: 'i' } },
+        { phone: { $regex: s, $options: 'i' } },
+      ];
+    }
+
+    const items = await ExternalDebt.find(query)
+      .populate('createdBy', 'name username')
+      .sort({ createdAt: -1 });
+
+    res.json(items);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/external-debts', auth, async (req, res, next) => {
+  try {
+    const { title, debtorName, type, category, phone, totalAmount, paidAmount, dueDate, notes } = req.body;
+    if (!title || !debtorName || totalAmount === undefined) {
+      return res.status(400).json({ message: 'يرجى إدخال اسم المعاملة، واسم الطرف، والمبلغ الإجمالي.' });
+    }
+
+    const initialPaid = Number(paidAmount || 0);
+    const payments = initialPaid > 0 ? [{
+      amount: initialPaid,
+      date: new Date(),
+      notes: 'دفعة أولية عند تسجيل المعاملة'
+    }] : [];
+
+    const item = await ExternalDebt.create({
+      title: title.trim(),
+      debtorName: debtorName.trim(),
+      type: type || 'receivable',
+      category: category || 'أخرى',
+      phone: phone?.trim() || '',
+      totalAmount: Number(totalAmount),
+      paidAmount: initialPaid,
+      dueDate: dueDate ? new Date(dueDate) : undefined,
+      notes: notes?.trim() || '',
+      payments,
+      createdBy: req.admin.id
+    });
+
+    createNotification({
+      title: item.type === 'receivable' ? 'تسجيل مستحق مالي خارجي' : 'تسجيل التزام مالي خارجي',
+      message: `تم تسجيل معاملة "${item.title}" للطرف "${item.debtorName}" بإجمالي ${item.totalAmount} ج.`,
+      type: 'billing',
+      link: '/indebtedness',
+      createdBy: req.admin.id,
+    }).catch((err) => console.error('Notification error:', err));
+
+    res.status(201).json(item);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.put('/api/external-debts/:id', auth, async (req, res, next) => {
+  try {
+    const item = await ExternalDebt.findById(req.params.id);
+    if (!item) return res.status(404).json({ message: 'المعاملة غير موجودة.' });
+
+    const allowed = ['title', 'debtorName', 'type', 'category', 'phone', 'totalAmount', 'dueDate', 'notes'];
+    for (const key of allowed) {
+      if (req.body[key] !== undefined) {
+        item[key] = req.body[key];
+      }
+    }
+
+    await item.save();
+    res.json(item);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.delete('/api/external-debts/:id', auth, async (req, res, next) => {
+  try {
+    const item = await ExternalDebt.findByIdAndDelete(req.params.id);
+    if (!item) return res.status(404).json({ message: 'المعاملة غير موجودة.' });
+    res.json({ message: 'تم حذف المعاملة بنجاح.' });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/external-debts/:id/pay', auth, async (req, res, next) => {
+  try {
+    const amount = Number(req.body.amount);
+    const notes = req.body.notes?.trim() || '';
+    if (!amount || amount <= 0) {
+      return res.status(400).json({ message: 'يرجى إدخال مبلغ صحيح للدفعة.' });
+    }
+
+    const item = await ExternalDebt.findById(req.params.id);
+    if (!item) return res.status(404).json({ message: 'المعاملة غير موجودة.' });
+
+    item.paidAmount = (item.paidAmount || 0) + amount;
+    item.payments.push({
+      amount,
+      date: new Date(),
+      notes
+    });
+
+    await item.save();
+
+    createNotification({
+      title: 'سداد دفعة مالية خارجية',
+      message: `تم تسجيل سداد بقيمة ${amount} ج للمعاملة "${item.title}".`,
+      type: 'billing',
+      link: '/indebtedness',
+      createdBy: req.admin.id,
+    }).catch((err) => console.error('Notification error:', err));
+
+    res.json({ message: 'تم تسجيل الدفعة وتحديث الرصيد بنجاح.', item });
+  } catch (error) {
+    next(error);
   }
 });
 
@@ -535,11 +870,113 @@ app.get('/api/dashboard', auth, async (req, res, next) => {
       totalIncome, 
       checkupType: req.query.checkupType?.trim() || '',
       byCheckupType: byCheckupType.map((item) => ({ name: item._id || 'غير محدد', revenue: item.revenue || 0, visits: item.visits || 0, people: item.patients?.length || 0 })),
-      clinics: clinics.map((c) => ({ ...c.toObject(), income: map.get(String(c._id))?.income || 0, visits: map.get(String(c._id))?.visits || 0 })) 
-    }); 
-  } catch (error) { 
-    next(error); 
-  } 
+      clinics: clinics.map((c) => ({ ...c.toObject(), income: map.get(String(c._id))?.income || 0, visits: map.get(String(c._id))?.visits || 0 }))
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Lightweight Sidebar Counts & Badges Endpoint
+app.get(['/api/dashboard/sidebar-counts', '/api/sidebar-counts'], auth, async (req, res, next) => {
+  try {
+    const now = new Date();
+    const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+    const endOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+
+    const adminId = req.admin?.id || req.admin?._id;
+
+    const notifFilter = {
+      $and: [
+        {
+          $or: [
+            { recipient: adminId },
+            { recipient: null }
+          ]
+        },
+        {
+          $or: [
+            { isRead: false },
+            { isRead: { $exists: false } }
+          ]
+        },
+        {
+          readBy: {
+            $not: {
+              $elemMatch: { admin: adminId }
+            }
+          }
+        }
+      ]
+    };
+
+    const [
+      todayAppointments,
+      upcomingAppointments,
+      totalPatients,
+      pendingDebts,
+      todayVisits,
+      prescriptions,
+      totalVisits,
+      unreadNotifications,
+      urgentCases
+    ] = await Promise.all([
+      // Appointments for today
+      Appointment.countDocuments({
+        status: { $ne: 'ملغي' },
+        appointmentAt: { $gte: startOfDay, $lte: endOfDay }
+      }),
+      // Upcoming appointments
+      Appointment.countDocuments({
+        status: { $ne: 'ملغي' },
+        appointmentAt: { $gte: startOfDay }
+      }),
+      // Total patients
+      Patient.countDocuments(),
+      // Pending or partially paid external debts
+      ExternalDebt.countDocuments({
+        status: { $in: ['معلق', 'مسدد جزئياً'] }
+      }),
+      // Operations / Visits conducted today
+      Visit.countDocuments({
+        $or: [
+          { visitDate: { $gte: startOfDay, $lte: endOfDay } },
+          { createdAt: { $gte: startOfDay, $lte: endOfDay } }
+        ]
+      }),
+      // Prescriptions with treatments / diagnosis
+      Visit.countDocuments({
+        $or: [
+          { treatmentPlan: { $exists: true, $ne: '' } },
+          { diagnosis: { $exists: true, $ne: '' } }
+        ]
+      }),
+      // Completed visits / Clinical reports
+      Visit.countDocuments({ status: 'مكتمل' }),
+      // Unread notifications for this admin
+      Notification.countDocuments(notifFilter),
+      // Urgent alerts
+      Notification.countDocuments({
+        type: 'urgent',
+        ...notifFilter
+      })
+    ]);
+
+    res.json({
+      appointments: todayAppointments > 0 ? todayAppointments : upcomingAppointments,
+      todayAppointments,
+      upcomingAppointments,
+      patients: totalPatients,
+      debts: pendingDebts,
+      operations: todayVisits,
+      prescriptions,
+      reports: totalVisits,
+      unreadNotifications,
+      urgentCases
+    });
+  } catch (error) {
+    next(error);
+  }
 });
 
 app.get('/api/reports', auth, async (req, res, next) => { 
@@ -567,14 +1004,169 @@ app.get('/api/reports', auth, async (req, res, next) => {
     const map = new Map(byClinic.map((v) => [String(v._id), v])); 
     const typeMetrics = new Map(byCheckupType.map((item) => [item._id || '', item]));
     const visibleTypes = selectedCheckupType ? [selectedCheckupType] : byCheckupType.map((item) => item._id).filter(Boolean).sort((a, b) => a.localeCompare(b, 'ar'));
-    res.json({ 
-      rows: clinics.map((c) => ({ id: c._id, name: c.name, location: c.location, checkupType: selectedCheckupType || 'كل أنواع الكشف', revenue: map.get(String(c._id))?.revenue || 0, visitors: map.get(String(c._id))?.visitors || 0 })), 
+    res.json({
+      rows: clinics.map((c) => ({ id: c._id, name: c.name, location: c.location, checkupType: selectedCheckupType || 'كل أنواع الكشف', revenue: map.get(String(c._id))?.revenue || 0, visitors: map.get(String(c._id))?.visitors || 0 })),
       typeRows: visibleTypes.map((type) => { const item = typeMetrics.get(type); return { id: type, name: type, people: item?.patients?.length || 0, visits: item?.visits || 0, revenue: item?.revenue || 0, totalCost: item?.totalCost || 0 }; }),
-      summary: summary[0] || { revenue: 0, visitors: 0, averagePayment: 0 }, 
-    }); 
-  } catch (error) { 
-    next(error); 
-  } 
+      summary: summary[0] || { revenue: 0, visitors: 0, averagePayment: 0 },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ── Notifications Routes ──
+
+// Real-time Server-Sent Events (SSE) Stream
+app.get('/api/notifications/stream', auth, (req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  if (typeof res.flushHeaders === 'function') {
+    res.flushHeaders();
+  }
+
+  const clientId = `${req.admin.id || req.admin._id}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+  addSseClient(clientId, res, req.admin);
+
+  req.on('close', () => {
+    removeSseClient(clientId);
+  });
+});
+
+// Get User's Notifications (with unread count, pagination & filter)
+app.get('/api/notifications', auth, async (req, res, next) => {
+  try {
+    const limit = Math.min(Number(req.query.limit) || 30, 100);
+    const page = Math.max(Number(req.query.page) || 1, 1);
+    const unreadOnly = req.query.unreadOnly === 'true';
+
+    const baseFilter = {
+      $or: [
+        { recipient: req.admin.id },
+        { recipient: null },
+        { recipient: { $exists: false } }
+      ]
+    };
+
+    const filter = unreadOnly
+      ? { ...baseFilter, isRead: false, 'readBy.admin': { $ne: req.admin.id } }
+      : baseFilter;
+
+    const [rawNotifications, unreadCount, total] = await Promise.all([
+      Notification.find(filter)
+        .populate('createdBy', 'name username role')
+        .sort({ createdAt: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit),
+      Notification.countDocuments({
+        ...baseFilter,
+        isRead: false,
+        'readBy.admin': { $ne: req.admin.id }
+      }),
+      Notification.countDocuments(baseFilter)
+    ]);
+
+    const notifications = rawNotifications.map((n) => {
+      const isReadForUser = Boolean(n.isRead || n.readBy?.some((r) => String(r.admin) === String(req.admin.id)));
+      const obj = n.toObject();
+      return {
+        ...obj,
+        isRead: isReadForUser
+      };
+    });
+
+    res.json({
+      notifications,
+      unreadCount,
+      total,
+      page,
+      pages: Math.ceil(total / limit) || 1
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Mark single notification as read
+app.patch('/api/notifications/:id/read', auth, async (req, res, next) => {
+  try {
+    const notification = await Notification.findById(req.params.id);
+    if (!notification) {
+      return res.status(404).json({ message: 'الإشعار غير موجود.' });
+    }
+
+    notification.isRead = true;
+    const hasRead = notification.readBy.some((r) => String(r.admin) === String(req.admin.id));
+    if (!hasRead) {
+      notification.readBy.push({ admin: req.admin.id, readAt: new Date() });
+    }
+
+    await notification.save();
+
+    const formatted = {
+      ...notification.toObject(),
+      isRead: true
+    };
+
+    res.json(formatted);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Mark all notifications as read for current user
+app.patch('/api/notifications/mark-all-read', auth, async (req, res, next) => {
+  try {
+    const filter = {
+      $or: [
+        { recipient: req.admin.id },
+        { recipient: null },
+        { recipient: { $exists: false } }
+      ]
+    };
+
+    const result = await Notification.updateMany(
+      filter,
+      {
+        $set: { isRead: true },
+        $addToSet: { readBy: { admin: req.admin.id, readAt: new Date() } }
+      }
+    );
+
+    res.json({ success: true, count: result.modifiedCount, message: 'تم تحديد جميع الإشعارات كمقروءة.' });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Delete a single notification
+app.delete('/api/notifications/:id', auth, async (req, res, next) => {
+  try {
+    const notification = await Notification.findByIdAndDelete(req.params.id);
+    if (!notification) {
+      return res.status(404).json({ message: 'الإشعار غير موجود.' });
+    }
+    res.json({ success: true, message: 'تم حذف الإشعار بنجاح.' });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Clear all notifications
+app.delete('/api/notifications', auth, async (req, res, next) => {
+  try {
+    const filter = {
+      $or: [
+        { recipient: req.admin.id },
+        { recipient: null }
+      ]
+    };
+    await Notification.deleteMany(filter);
+    res.json({ success: true, message: 'تم مسح الإشعارات بنجاح.' });
+  } catch (error) {
+    next(error);
+  }
 });
 
 // Central Error Handler
@@ -638,10 +1230,23 @@ mongoose.connect(process.env.MONGODB_URI, { serverSelectionTimeoutMS: 10000 })
     }
 
     if (!await Subscription.countDocuments()) {
-      await Subscription.create({ 
-        expiresAt: new Date('2026-08-22T18:05:00+03:00'), 
-        renewalCodeHash: await bcrypt.hash('CLINIC-2027-START', 12) 
-      }); 
+      await Subscription.create({
+        expiresAt: new Date('2026-08-22T18:05:00+03:00'),
+        renewalCodeHash: await bcrypt.hash('CLINIC-2027-START', 12)
+      });
+    }
+
+    try {
+      if (!await Notification.countDocuments()) {
+        await Notification.create({
+          title: 'مرحباً بك في نظام العيادة',
+          message: 'تم تفعيل مركز الإشعارات الفوري بنجاح. ستصلك هنا تنبيهات المواعيد، المرضى والعمليات المالية فور حدوثها.',
+          type: 'system',
+          isRead: false,
+        });
+      }
+    } catch (err) {
+      console.warn('Seeding notification notice:', err.message);
     }
 
     if (!process.env.VERCEL) {

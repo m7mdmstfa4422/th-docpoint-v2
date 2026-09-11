@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo, useCallback } from 'react';
+import { useNavigate, Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
   Building2,
@@ -9,293 +10,614 @@ import {
   Activity,
   ArrowUpRight,
   Sparkles,
-  Loader2,
   Filter,
-  Stethoscope
+  Stethoscope,
+  Printer,
+  RefreshCw,
+  Scale,
+  Clock,
+  ExternalLink,
+  ChevronDown,
+  X,
+  Receipt,
+  CheckCircle2,
+  AlertCircle,
+  Layers,
 } from 'lucide-react';
 import { api } from '../../api';
 
+/* ─── Signature Clinical Gradient ─── */
+const SIGNATURE_GRADIENT =
+  'linear-gradient(135deg, rgb(3, 105, 161) 0%, rgb(2, 132, 199) 50%, rgb(14, 165, 233) 100%)';
+
 export default function FinancialDashboard() {
+  const navigate = useNavigate();
+
+  /* ─── Data State ─── */
   const [data, setData] = useState(null);
   const [checkupSummary, setCheckupSummary] = useState([]);
-  const [message, setMessage] = useState('');
   const [checkupTypes, setCheckupTypes] = useState([]);
   const [checkupType, setCheckupType] = useState('');
+  const [debtsOverview, setDebtsOverview] = useState(null);
 
-  useEffect(() => {
-    const query = checkupType ? `?checkupType=${encodeURIComponent(checkupType)}` : '';
-    api(`/dashboard${query}`)
-      .then(setData)
-      .catch((error) => setMessage(error.message));
-    api(`/finance/checkup-summary${query}`)
-      .then((rows) => setCheckupSummary(Array.isArray(rows) ? rows : []))
-      .catch((error) => setMessage(error.message));
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [message, setMessage] = useState('');
+
+  /* ─── Load Data ─── */
+  const loadData = useCallback(async (isManual = false) => {
+    if (isManual) setRefreshing(true);
+    else setLoading(true);
+
+    try {
+      const query = checkupType ? `?checkupType=${encodeURIComponent(checkupType)}` : '';
+      const [dashRes, summaryRes, typesRes, debtsRes] = await Promise.all([
+        api(`/dashboard${query}`, { showLoading: false }),
+        api(`/finance/checkup-summary${query}`, { showLoading: false }).catch(() => []),
+        api('/reports/checkup-types', { showLoading: false }).catch(() => []),
+        api('/debts/overview', { showLoading: false }).catch(() => null),
+      ]);
+
+      setData(dashRes);
+      setCheckupSummary(Array.isArray(summaryRes) ? summaryRes : []);
+      setCheckupTypes(Array.isArray(typesRes) ? typesRes : []);
+      setDebtsOverview(debtsRes);
+    } catch (error) {
+      console.error('Error loading financial dashboard:', error);
+      setMessage(error.message || 'تعذر مزامنة البيانات المالية');
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
   }, [checkupType]);
 
   useEffect(() => {
-    api('/reports/checkup-types').then((res) => setCheckupTypes(Array.isArray(res) ? res : [])).catch((error) => setMessage(error.message));
-  }, []);
+    loadData();
+  }, [loadData]);
 
-  if (!data) {
+  if (loading && !data) {
     return (
-      <div className="flex min-h-[400px] flex-col items-center justify-center gap-3" dir="rtl">
-        <Loader2 className="h-8 w-8 animate-spin text-sky-600" />
-        <p className="text-sm font-medium text-slate-500">{message || 'جارٍ مزامنة البيانات المالية...'}</p>
+      <div className="flex min-h-[450px] flex-col items-center justify-center gap-3 p-8 text-center" dir="rtl">
+        <RefreshCw className="h-8 w-8 animate-spin text-sky-600" />
+        <p className="text-sm font-bold text-slate-700">جارٍ مزامنة البيانات المالية والتشغيلية...</p>
+        <p className="text-xs text-slate-400">يرجى الانتظار لحظات</p>
       </div>
     );
   }
 
-  const cards = [
-    {
-      label: 'إجمالي الإيرادات',
-      value: `${data.totalIncome.toLocaleString('ar-EG')} ج`,
-      icon: Wallet,
-      sub: 'نمو مستقر ومستمر',
-      tone: 'text-sky-700 bg-sky-50 border-sky-100'
-    },
-    {
-      label: 'إجمالي المرضى',
-      value: data.patients.toLocaleString('ar-EG'),
-      icon: Users,
-      sub: 'ملف طبي مفعل',
-      tone: 'text-blue-700 bg-blue-50 border-blue-100'
-    },
-    {
-      label: 'الزيارات المكتملة',
-      value: data.visits.toLocaleString('ar-EG'),
-      icon: CalendarDays,
-      sub: 'كشف واستشارة',
-      tone: 'text-indigo-800 bg-indigo-50 border-indigo-100'
-    },
-    {
-      label: 'العيادات النشطة',
-      value: data.clinics.length.toLocaleString('ar-EG'),
-      icon: Building2,
-      sub: 'مراكز تعمل بكفاءة',
-      tone: 'text-cyan-700 bg-cyan-50 border-cyan-100'
-    }
-  ];
+  if (!data) {
+    return (
+      <div className="flex min-h-[400px] flex-col items-center justify-center gap-4 p-8 text-center" dir="rtl">
+        <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-rose-50 text-rose-600 border border-rose-100">
+          <AlertCircle size={28} />
+        </div>
+        <h3 className="text-base font-black text-slate-900">تعذر تحميل البيانات المالية</h3>
+        <p className="text-xs text-slate-400 max-w-sm">{message || 'حدث خطأ أثناء الاتصال بالخادم.'}</p>
+        <button
+          type="button"
+          onClick={() => loadData(true)}
+          className="rounded-xl bg-slate-900 px-4 py-2 text-xs font-bold text-white shadow-sm hover:bg-slate-800 transition"
+        >
+          إعادة المحاولة
+        </button>
+      </div>
+    );
+  }
 
-  const max = Math.max(...data.clinics.map((clinic) => clinic.income), 1);
+  const maxClinicIncome = Math.max(...data.clinics.map((c) => c.income || 0), 1);
+  const totalSummaryRevenue = checkupSummary.reduce((sum, r) => sum + (Number(r.revenue) || 0), 0) || 1;
 
   return (
-    <div className="min-h-screen bg-[#F8FAFC] p-4 text-slate-800 md:p-8" dir="rtl">
-      <div className="mx-auto max-w-7xl space-y-8">
+    <section className="min-h-screen bg-slate-50/70 p-4 sm:p-6 lg:p-8" dir="rtl">
+      {/* ── Print Styles ── */}
+      <style>{`
+        @media print {
+          body * { visibility: hidden; }
+          #printable-financial-report, #printable-financial-report * { visibility: visible; }
+          #printable-financial-report { position: absolute; left: 0; top: 0; width: 100%; }
+        }
+      `}</style>
 
-        {/* Header with Ambient Glow & Floating Badge */}
+      <div className="mx-auto max-w-7xl space-y-6" id="printable-financial-report">
+        {/* ── Hero Banner ── */}
         <motion.header
-          initial={{ opacity: 0, y: -20 }}
+          initial={{ opacity: 0, y: -12 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5 }}
-          className="relative overflow-hidden rounded-3xl border border-sky-100 bg-white p-6 shadow-sm md:p-8"
+          className="relative overflow-hidden rounded-3xl border border-slate-200/80 bg-white/95 p-6 shadow-sm shadow-slate-200/50 backdrop-blur-md md:p-8"
         >
-          {/* Animated Background Aura */}
-          <motion.div
-            animate={{
-              scale: [1, 1.25, 1],
-              opacity: [0.35, 0.6, 0.35]
-            }}
-            transition={{ duration: 8, repeat: Infinity, ease: 'easeInOut' }}
-            className="absolute -top-24 -right-24 h-72 w-72 rounded-full bg-sky-200/50 blur-3xl"
-          />
-          <motion.div
-            animate={{
-              scale: [1, 1.3, 1],
-              opacity: [0.25, 0.5, 0.25]
-            }}
-            transition={{ duration: 10, repeat: Infinity, ease: 'easeInOut', delay: 1 }}
-            className="absolute -bottom-24 -left-24 h-72 w-72 rounded-full bg-cyan-200/40 blur-3xl"
-          />
+          {/* Ambient Lighting Circles */}
+          <div className="pointer-events-none absolute -left-20 -top-20 h-64 w-64 rounded-full bg-sky-100/50 blur-3xl" />
+          <div className="pointer-events-none absolute -right-20 -bottom-20 h-64 w-64 rounded-full bg-indigo-100/40 blur-3xl" />
 
-          <div className="relative z-10 flex flex-col justify-between gap-4 md:flex-row md:items-center">
+          <div className="relative flex flex-col gap-5 md:flex-row md:items-center md:justify-between">
+            {/* Title & Info */}
             <div>
-              <div className="inline-flex items-center gap-2 rounded-full border border-sky-200 bg-sky-50 px-3 py-1 text-xs font-semibold text-sky-800">
-                <motion.span
-                  animate={{ rotate: [0, 15, -15, 0] }}
-                  transition={{ repeat: Infinity, duration: 3, ease: 'easeInOut' }}
-                >
-                  <Sparkles className="h-3.5 w-3.5 text-sky-600" />
-                </motion.span>
-                لوحة المتابعة الذكية الحية
+              <div className="flex items-center gap-2">
+                <span className="inline-flex items-center gap-1.5 rounded-full border border-sky-100 bg-sky-50 px-3 py-1 text-xs font-bold text-sky-700">
+                  <Sparkles size={13} className="text-sky-600" />
+                  DOCPOINT · لوحة الإدارة والمتابعة المالية
+                </span>
+                <span className="inline-flex items-center gap-1 rounded-full border border-emerald-100 bg-emerald-50 px-2.5 py-0.5 text-[11px] font-bold text-emerald-700">
+                  <span className="h-1.5 w-1.5 rounded-full bg-[#38C698] animate-pulse" />
+                  مباشر
+                </span>
               </div>
-              <h1 className="mt-2 text-2xl font-black text-slate-900 md:text-3xl">
+
+              <h1 className="mt-3 text-2xl font-black text-slate-900 md:text-3xl">
                 التقرير المالي والتشغيلي الموحد
               </h1>
-              <p className="mt-1 text-xs text-slate-500 md:text-sm">
-                {checkupType ? `البيانات المالية لنوع الكشف: ${checkupType}` : 'متابعة حية للإيرادات، تدفق المرضى، والنشاط التشغيلي لجميع الفروع'}
+              <p className="mt-1.5 text-xs text-slate-500 md:text-sm">
+                {checkupType
+                  ? `عرض المؤشرات المالية المخصصة لنوع الكشف: "${checkupType}"`
+                  : 'متابعة حية وشاملة للإيرادات، تدفقات المرضى، كفاءة الفروع، وتوزيع الدخل بحسب الفحوصات الطبية.'}
               </p>
             </div>
 
+            {/* Header Action Buttons */}
+            <div className="flex flex-wrap items-center gap-2.5">
+              <button
+                type="button"
+                onClick={() => loadData(true)}
+                disabled={refreshing}
+                title="تحديث البيانات"
+                className="inline-flex h-10 items-center gap-2 rounded-2xl border border-slate-200/80 bg-white px-3.5 text-xs font-bold text-slate-700 shadow-2xs transition hover:bg-slate-50 active:scale-95 disabled:opacity-50"
+              >
+                <RefreshCw size={14} className={refreshing ? 'animate-spin text-sky-600' : ''} />
+                <span>تحديث</span>
+              </button>
 
+              <button
+                type="button"
+                onClick={() => window.print()}
+                title="طباعة التقرير المالي"
+                className="inline-flex h-10 items-center gap-2 rounded-2xl border border-slate-200/80 bg-white px-3.5 text-xs font-bold text-slate-700 shadow-2xs transition hover:bg-slate-50 active:scale-95"
+              >
+                <Printer size={14} className="text-slate-600" />
+                <span>طباعة التقرير</span>
+              </button>
 
-            {/* Live Indicator */}
-            <div className="flex items-center gap-3 self-start rounded-2xl border border-slate-100 bg-slate-50/80 px-4 py-2.5 backdrop-blur-md md:self-auto">
-              <span className="relative flex h-3 w-3">
-                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-sky-400 opacity-75"></span>
-                <span className="relative inline-flex h-3 w-3 rounded-full bg-sky-600"></span>
-              </span>
-              <span className="text-xs font-bold text-slate-700">تحديث فوري مباشر</span>
+              <Link
+                to="/Indebtedness"
+                className="inline-flex h-10 items-center gap-2 rounded-2xl px-4 text-xs font-bold text-white shadow-sm shadow-sky-600/20 transition active:scale-95"
+                style={{ background: SIGNATURE_GRADIENT }}
+              >
+                <Wallet size={15} />
+                <span>إدارة المديونيات والأموال</span>
+              </Link>
             </div>
           </div>
         </motion.header>
 
-        {/* Stats Grid */}
-        <motion.div
-          initial="hidden"
-          animate="show"
-          variants={{
-            hidden: {},
-            show: { transition: { staggerChildren: 0.1 } }
-          }}
-          className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4"
-        >
-          {cards.map(({ label, value, icon: Icon, sub, tone }) => (
-            <motion.div
-              key={label}
-              variants={{
-                hidden: { opacity: 0, y: 20 },
-                show: { opacity: 1, y: 0 }
-              }}
-              whileHover={{ y: -4, transition: { duration: 0.2 } }}
-              className="group relative overflow-hidden rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm transition-all hover:border-sky-300 hover:shadow-md"
-            >
-              <div className="flex items-center justify-between">
-                <motion.div
-                  whileHover={{ scale: 1.1, rotate: 5 }}
-                  className={`flex h-12 w-12 items-center justify-center rounded-2xl border ${tone}`}
-                >
-                  <Icon className="h-6 w-6" />
-                </motion.div>
-                <div className="flex items-center gap-1 text-[11px] font-bold text-sky-700">
-                  <span>محدث</span>
-                  <ArrowUpRight className="h-3 w-3" />
-                </div>
-              </div>
-
-              <div className="mt-4">
-                <p className="text-xs font-semibold text-slate-400">{label}</p>
-                <b className="mt-1 block text-2xl font-black text-slate-900 tracking-tight">{value}</b>
-                <p className="mt-1 text-[11px] text-slate-400">{sub}</p>
-              </div>
-
-              {/* Card Accent Bottom Line */}
-              <div className="absolute inset-x-0 bottom-0 h-1 bg-gradient-to-r from-sky-600 to-cyan-400 opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
-            </motion.div>
-          ))}
-        </motion.div>
-
-        {/* Charts & Detail Breakdown */}
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-
-          {/* Main Visual Progress Chart */}
-          <motion.section
-            initial={{ opacity: 0, y: 20 }}
+        {/* ── Metric Cards (KPIs) ── */}
+        <div className="grid grid-cols-2 gap-3.5 sm:grid-cols-4 sm:gap-4">
+          {/* Card 1: Total Revenue */}
+          <motion.div
+            initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5, delay: 0.3 }}
-            className="rounded-3xl border border-sky-100 bg-white p-6 shadow-sm lg:col-span-2"
+            transition={{ delay: 0.05 }}
+            className="rounded-2xl border border-slate-200/80 bg-white/95 p-4 shadow-2xs shadow-slate-200/40 transition-all hover:shadow-md"
           >
-            <div className="mb-6 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-sky-50 text-sky-700">
-                  <TrendingUp className="h-4 w-4" />
-                </div>
-                <div>
-                  <h3 className="text-base font-bold text-slate-900">مقارنة الإيرادات بحسب المركز</h3>
-                  <p className="text-xs text-slate-400">توزيع الحصة المالية لكل عيادة نشطة</p>
-                </div>
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-slate-500">إجمالي الإيرادات</span>
+              <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600 border border-emerald-100">
+                <Wallet size={16} />
+              </span>
+            </div>
+            <div className="mt-2 flex items-baseline gap-1.5">
+              <span className="text-2xl font-black text-slate-900">
+                {data.totalIncome.toLocaleString('ar-EG')}
+              </span>
+              <span className="text-[11px] font-medium text-slate-400">ج.م</span>
+            </div>
+            <p className="mt-1 text-[10.5px] font-medium text-emerald-700">مبالغ محصلة فعلياً</p>
+          </motion.div>
+
+          {/* Card 2: Net Position */}
+          <motion.div
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.1 }}
+            className="rounded-2xl border border-slate-200/80 bg-white/95 p-4 shadow-2xs shadow-slate-200/40 transition-all hover:shadow-md"
+          >
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-slate-500">صافي الموقف المالي</span>
+              <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-sky-50 text-sky-600 border border-sky-100">
+                <Scale size={16} />
+              </span>
+            </div>
+            <div className="mt-2 flex items-baseline gap-1.5">
+              <span className="text-2xl font-black text-sky-900">
+                {debtsOverview
+                  ? Number(debtsOverview.netPosition || 0).toLocaleString('ar-EG')
+                  : data.totalIncome.toLocaleString('ar-EG')}
+              </span>
+              <span className="text-[11px] font-medium text-slate-400">ج.م</span>
+            </div>
+            <p className="mt-1 text-[10.5px] font-medium text-slate-400">شاملاً كافة المستحقات والديون</p>
+          </motion.div>
+
+          {/* Card 3: Completed Visits */}
+          <motion.div
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.15 }}
+            className="rounded-2xl border border-slate-200/80 bg-white/95 p-4 shadow-2xs shadow-slate-200/40 transition-all hover:shadow-md"
+          >
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-slate-500">الزيارات المكتملة</span>
+              <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600 border border-indigo-100">
+                <CalendarDays size={16} />
+              </span>
+            </div>
+            <div className="mt-2 flex items-baseline gap-2">
+              <span className="text-2xl font-black text-slate-900">
+                {data.visits.toLocaleString('ar-EG')}
+              </span>
+              <span className="text-[11px] font-medium text-slate-400">جلسة كشف</span>
+            </div>
+            <p className="mt-1 text-[10.5px] font-medium text-slate-400">
+              لـ {data.patients.toLocaleString('ar-EG')} مريض مسجل
+            </p>
+          </motion.div>
+
+          {/* Card 4: Outstanding Debts */}
+          <motion.div
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.2 }}
+            onClick={() => navigate('/Indebtedness')}
+            className="group cursor-pointer rounded-2xl border border-slate-200/80 bg-white/95 p-4 shadow-2xs shadow-slate-200/40 transition-all hover:border-amber-300 hover:shadow-md"
+          >
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-slate-500">مديونيات المرضى</span>
+              <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-amber-50 text-amber-600 border border-amber-100">
+                <Clock size={16} />
+              </span>
+            </div>
+            <div className="mt-2 flex items-baseline gap-1.5">
+              <span className="text-2xl font-black text-amber-800">
+                {debtsOverview
+                  ? Number(debtsOverview.patientsDebt || 0).toLocaleString('ar-EG')
+                  : '0'}
+              </span>
+              <span className="text-[11px] font-medium text-slate-400">ج.م</span>
+            </div>
+            <p className="mt-1 text-[10.5px] font-medium text-amber-700 flex items-center gap-0.5">
+              <span>متابعة وتفصيل المديونيات</span>
+              <ArrowUpRight size={11} />
+            </p>
+          </motion.div>
+        </div>
+
+        {/* ── Filter Bar (Filter by Checkup Type) ── */}
+        <div className="rounded-3xl border border-slate-200/80 bg-white/95 p-4 shadow-sm shadow-slate-200/50 backdrop-blur-md">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-center gap-2.5">
+              <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-sky-50 text-sky-700 border border-sky-100">
+                <Filter size={15} />
+              </span>
+              <div>
+                <h2 className="text-xs font-bold text-slate-800">تصفية التقرير المالي</h2>
+                <p className="text-[10.5px] text-slate-400">
+                  عرض الإحصائيات بحسب نوع الكشف الطبي المعتمد
+                </p>
               </div>
             </div>
 
-            <div className="space-y-6">
-              {data.clinics.map((clinic, index) => {
-                const percentage = Math.round((clinic.income / max) * 100);
-                return (
-                  <div key={clinic._id} className="space-y-2">
-                    <div className="flex items-center justify-between text-xs md:text-sm">
-                      <span className="font-bold text-slate-700">{clinic.name}</span>
-                      <div className="flex items-center gap-2">
-                        <span className="text-[11px] font-semibold text-slate-400">({percentage}%)</span>
-                        <b className="font-black text-sky-800">{clinic.income.toLocaleString('ar-EG')} ج</b>
+            <div className="flex items-center gap-2">
+              <div className="relative min-w-[200px]">
+                <select
+                  value={checkupType}
+                  onChange={(e) => setCheckupType(e.target.value)}
+                  className="h-9 w-full appearance-none rounded-xl border border-slate-200 bg-slate-50/70 pr-3.5 pl-8 text-xs font-bold text-slate-700 outline-none transition focus:border-sky-500 focus:bg-white"
+                >
+                  <option value="">كل أنواع الكشف الطبية</option>
+                  {checkupTypes.map((title) => (
+                    <option key={title} value={title}>
+                      {title}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown
+                  size={13}
+                  className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
+                />
+              </div>
+
+              {checkupType && (
+                <button
+                  type="button"
+                  onClick={() => setCheckupType('')}
+                  className="inline-flex items-center gap-1 rounded-xl px-2.5 py-1.5 text-xs font-bold text-rose-600 hover:bg-rose-50 transition"
+                >
+                  <X size={13} />
+                  <span>إلغاء الفلتر</span>
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* ── Main Two-Column Layout ── */}
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-3 items-start">
+          {/* ════════════ Right Column: Charts & Tables (lg:col-span-2) ════════════ */}
+          <div className="space-y-6 lg:col-span-2">
+            {/* Section 1: Clinics Revenue Comparison */}
+            <motion.section
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.1 }}
+              className="rounded-3xl border border-slate-200/80 bg-white/95 p-6 shadow-sm shadow-slate-200/50 backdrop-blur-md"
+            >
+              <div className="mb-6 flex items-center justify-between border-b border-slate-100 pb-4">
+                <div className="flex items-center gap-2.5">
+                  <span
+                    className="flex h-8 w-8 items-center justify-center rounded-xl text-white shadow-xs"
+                    style={{ background: SIGNATURE_GRADIENT }}
+                  >
+                    <TrendingUp size={16} />
+                  </span>
+                  <div>
+                    <h3 className="text-sm font-black text-slate-900">
+                      مقارنة الإيرادات بحسب المركز والفرع
+                    </h3>
+                    <p className="text-[11px] font-medium text-slate-400">
+                      توزيع الحصة المالية ومساهمة كل عيادة في إجمالي الدخل
+                    </p>
+                  </div>
+                </div>
+
+                <span className="rounded-full bg-sky-50 px-2.5 py-0.5 text-xs font-bold text-sky-700 border border-sky-100">
+                  {data.clinics.length} عيادة
+                </span>
+              </div>
+
+              <div className="space-y-5">
+                {data.clinics.map((clinic, index) => {
+                  const percentage = Math.round((clinic.income / maxClinicIncome) * 100);
+                  const avgPerVisit = clinic.visits
+                    ? Math.round(clinic.income / clinic.visits)
+                    : 0;
+
+                  return (
+                    <div key={clinic._id} className="space-y-2">
+                      <div className="flex items-center justify-between text-xs">
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-slate-800">{clinic.name}</span>
+                          <span className="text-[10px] text-slate-400">
+                            ({clinic.location || 'فرع رئيسي'})
+                          </span>
+                        </div>
+
+                        <div className="flex items-center gap-3">
+                          <span className="text-[11px] font-medium text-slate-400">
+                            {clinic.visits} زيارة (متوسط: {avgPerVisit.toLocaleString('ar-EG')} ج)
+                          </span>
+                          <span className="text-[11px] font-bold text-sky-700">
+                            {percentage}%
+                          </span>
+                          <b className="font-black text-slate-900 text-sm">
+                            {clinic.income.toLocaleString('ar-EG')} ج.م
+                          </b>
+                        </div>
+                      </div>
+
+                      {/* Progress Bar with Shimmer */}
+                      <div className="relative h-2.5 w-full overflow-hidden rounded-full bg-slate-100">
+                        <motion.div
+                          initial={{ width: 0 }}
+                          animate={{ width: `${percentage}%` }}
+                          transition={{ duration: 0.9, delay: 0.1 + index * 0.08, ease: 'easeOut' }}
+                          className="relative h-full rounded-full"
+                          style={{ background: SIGNATURE_GRADIENT }}
+                        >
+                          <motion.div
+                            animate={{ x: ['-100%', '200%'] }}
+                            transition={{ repeat: Infinity, duration: 2.5, ease: 'linear' }}
+                            className="absolute inset-0 w-1/2 bg-gradient-to-r from-transparent via-white/30 to-transparent"
+                          />
+                        </motion.div>
                       </div>
                     </div>
+                  );
+                })}
+              </div>
+            </motion.section>
 
-                    <div className="relative h-3 w-full overflow-hidden rounded-full bg-slate-100">
-                      <motion.div
-                        initial={{ width: 0 }}
-                        animate={{ width: `${percentage}%` }}
-                        transition={{ duration: 1, delay: 0.2 + index * 0.1, ease: 'easeOut' }}
-                        className="relative h-full rounded-full bg-gradient-to-l from-sky-600 via-blue-700 to-cyan-400"
-                      >
-                        {/* Shimmer Light Bar */}
-                        <motion.div
-                          animate={{ x: ['-100%', '200%'] }}
-                          transition={{ repeat: Infinity, duration: 2.5, ease: 'linear' }}
-                          className="absolute inset-0 w-1/2 bg-gradient-to-r from-transparent via-white/30 to-transparent"
-                        />
-                      </motion.div>
+            {/* Section 2: Table of Revenue by Checkup Type */}
+            <motion.section
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.15 }}
+              className="overflow-hidden rounded-3xl border border-slate-200/80 bg-white/95 shadow-sm shadow-slate-200/50 backdrop-blur-md"
+            >
+              <div className="flex items-center justify-between border-b border-slate-100 p-6">
+                <div className="flex items-center gap-2.5">
+                  <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-indigo-50 text-indigo-700 border border-indigo-100">
+                    <Stethoscope size={16} />
+                  </span>
+                  <div>
+                    <h3 className="text-sm font-black text-slate-900">
+                      توزيع الإيرادات بحسب نوع الكشف الطبي
+                    </h3>
+                    <p className="text-[11px] font-medium text-slate-400">
+                      بيانات دقيقة مستخرجة من سجلات الزيارات الفعلية
+                    </p>
+                  </div>
+                </div>
+
+                <span className="rounded-full bg-indigo-50 px-2.5 py-0.5 text-xs font-bold text-indigo-700 border border-indigo-100">
+                  {checkupSummary.length} نوع كشف
+                </span>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-right text-xs">
+                  <thead className="border-b border-slate-100 bg-slate-50/70 text-slate-600 font-bold">
+                    <tr>
+                      <th className="p-4">نوع الكشف</th>
+                      <th className="p-4">المرضى المستفيدون</th>
+                      <th className="p-4">عدد الكشوفات</th>
+                      <th className="p-4">إجمالي الإيراد</th>
+                      <th className="p-4">متوسط الإيراد / كشف</th>
+                      <th className="p-4">حصة المساهمة</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {checkupSummary.length ? (
+                      checkupSummary.map((row) => {
+                        const rowRev = Number(row.revenue || 0);
+                        const rowVisits = Number(row.visits || 0);
+                        const rowShare = Math.round((rowRev / totalSummaryRevenue) * 100);
+                        const avg = rowVisits ? Math.round(rowRev / rowVisits) : 0;
+
+                        return (
+                          <tr key={row.name} className="hover:bg-sky-50/40 transition">
+                            <td className="p-4 font-black text-slate-900">{row.name}</td>
+                            <td className="p-4 text-slate-600">
+                              {Number(row.people).toLocaleString('ar-EG')} مريض
+                            </td>
+                            <td className="p-4 font-semibold text-slate-700">
+                              {rowVisits.toLocaleString('ar-EG')} كشف
+                            </td>
+                            <td className="p-4 font-black text-sky-900 text-sm">
+                              {rowRev.toLocaleString('ar-EG')} ج.م
+                            </td>
+                            <td className="p-4 text-slate-600 font-medium">
+                              {avg.toLocaleString('ar-EG')} ج
+                            </td>
+                            <td className="p-4">
+                              <div className="flex items-center gap-2">
+                                <div className="h-1.5 w-14 overflow-hidden rounded-full bg-slate-100">
+                                  <div
+                                    style={{ width: `${rowShare}%` }}
+                                    className="h-full rounded-full bg-indigo-600"
+                                  />
+                                </div>
+                                <span className="font-bold text-slate-500 text-[10.5px]">
+                                  {rowShare}%
+                                </span>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })
+                    ) : (
+                      <tr>
+                        <td colSpan={6} className="p-8 text-center text-xs text-slate-400">
+                          لا توجد كشوفات مكتملة مطابقة للفلتر المحدد.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </motion.section>
+          </div>
+
+          {/* ════════════ Left Column: Operational Activity & Debt Panels (lg:col-span-1) ════════════ */}
+          <aside className="space-y-6">
+            {/* Panel 1: Operational Activity */}
+            <motion.div
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.2 }}
+              className="rounded-3xl border border-slate-200/80 bg-white/95 p-6 shadow-sm shadow-slate-200/50 backdrop-blur-md"
+            >
+              <div className="mb-4 flex items-center justify-between border-b border-slate-100 pb-3">
+                <div className="flex items-center gap-2 text-xs font-bold text-slate-800">
+                  <Activity className="h-4 w-4 text-sky-600" />
+                  <span>النشاط التشغيلي للفروع</span>
+                </div>
+                <span className="text-[10.5px] font-medium text-slate-400">حركة الزيارات</span>
+              </div>
+
+              <div className="space-y-2.5">
+                {data.clinics.map((clinic) => (
+                  <div
+                    key={clinic._id}
+                    className="flex items-center justify-between rounded-2xl border border-slate-100 bg-slate-50/70 p-3.5 transition hover:border-sky-200 hover:bg-white"
+                  >
+                    <div className="space-y-0.5 min-w-0">
+                      <b className="text-xs font-bold text-slate-800 block truncate">{clinic.name}</b>
+                      <p className="text-[10.5px] text-slate-400 truncate">
+                        {clinic.location || 'الفرع الرئيسي'}
+                      </p>
                     </div>
-                  </div>
-                );
-              })}
-            </div>
-          </motion.section>
 
-          {/* Operational Clinic Overview */}
-          <motion.section
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5, delay: 0.4 }}
-            className="rounded-3xl border border-sky-100 bg-white p-6 shadow-sm"
-          >
-            <div className="mb-5 flex items-center gap-2">
-              <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-sky-50 text-sky-700">
-                <Activity className="h-4 w-4" />
-              </div>
-              <div>
-                <h3 className="text-base font-bold text-slate-900">النشاط التشغيلي</h3>
-                <p className="text-xs text-slate-400">حركة الفروع والزيارات</p>
-              </div>
-            </div>
-
-            <div className="space-y-3">
-              {data.clinics.map((clinic) => (
-                <motion.div
-                  key={clinic._id}
-                  whileHover={{ scale: 1.02 }}
-                  className="flex items-center justify-between rounded-2xl border border-slate-100 bg-[#F8FAFC] p-4 transition-all hover:border-sky-200 hover:bg-white hover:shadow-sm"
-                >
-                  <div className="space-y-1">
-                    <b className="text-sm font-bold text-slate-800">{clinic.name}</b>
-                    <p className="text-xs text-slate-400">{clinic.location}</p>
-                  </div>
-
-                  <div className="flex flex-col items-end">
-                    <span className="rounded-xl border border-sky-100 bg-sky-50/80 px-2.5 py-1 text-xs font-black text-sky-800">
+                    <span className="shrink-0 rounded-xl border border-sky-100 bg-sky-50 px-2.5 py-1 text-xs font-black text-sky-800">
                       {clinic.visits} زيارة
                     </span>
                   </div>
-                </motion.div>
-              ))}
-            </div>
-          </motion.section>
+                ))}
+              </div>
+            </motion.div>
 
+            {/* Panel 2: Debts & Financial Position Overview */}
+            {debtsOverview && (
+              <motion.div
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.25 }}
+                className="rounded-3xl border border-slate-200/80 bg-white/95 p-6 shadow-sm shadow-slate-200/50 backdrop-blur-md space-y-4"
+              >
+                <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                  <div className="flex items-center gap-2 text-xs font-bold text-slate-800">
+                    <Receipt className="h-4 w-4 text-emerald-600" />
+                    <span>موقف المستحقات والمديونيات</span>
+                  </div>
+                  <Link
+                    to="/Indebtedness"
+                    className="text-xs font-bold text-sky-600 hover:underline inline-flex items-center gap-0.5"
+                  >
+                    <span>التفاصيل</span>
+                    <ArrowUpRight size={12} />
+                  </Link>
+                </div>
+
+                <div className="space-y-2.5 text-xs">
+                  <div className="flex items-center justify-between rounded-2xl border border-slate-100 bg-slate-50/70 p-3">
+                    <span className="text-slate-500 font-semibold">مديونيات المرضى:</span>
+                    <b className="text-amber-800 font-black">
+                      {Number(debtsOverview.patientsDebt || 0).toLocaleString('ar-EG')} ج
+                    </b>
+                  </div>
+
+                  <div className="flex items-center justify-between rounded-2xl border border-slate-100 bg-slate-50/70 p-3">
+                    <span className="text-slate-500 font-semibold">مستحقات خارجية لنا:</span>
+                    <b className="text-emerald-700 font-black">
+                      {Number(debtsOverview.externalReceivables || 0).toLocaleString('ar-EG')} ج
+                    </b>
+                  </div>
+
+                  <div className="flex items-center justify-between rounded-2xl border border-slate-100 bg-slate-50/70 p-3">
+                    <span className="text-slate-500 font-semibold">التزامات خارجية علينا:</span>
+                    <b className="text-rose-600 font-black">
+                      {Number(debtsOverview.externalPayables || 0).toLocaleString('ar-EG')} ج
+                    </b>
+                  </div>
+
+                  <div className="flex items-center justify-between rounded-2xl border border-sky-200 bg-sky-50/60 p-3">
+                    <span className="text-sky-800 font-bold">إجمالي ما للطبيب:</span>
+                    <b className="text-sky-950 font-black text-sm">
+                      {Number(debtsOverview.totalOwedToDoctor || 0).toLocaleString('ar-EG')} ج
+                    </b>
+                  </div>
+                </div>
+
+                <Link
+                  to="/Indebtedness"
+                  className="flex w-full items-center justify-center gap-2 rounded-2xl py-2.5 text-xs font-bold text-white shadow-sm transition active:scale-95"
+                  style={{ background: SIGNATURE_GRADIENT }}
+                >
+                  <Wallet size={14} />
+                  <span>فتح إدارة المديونيات الكاملة</span>
+                </Link>
+              </motion.div>
+            )}
+          </aside>
         </div>
-
-        <motion.section initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, delay: 0.5 }} className="overflow-hidden rounded-3xl border border-violet-100 bg-white shadow-sm">
-          <div className="flex items-center gap-2 self-start rounded-2xl border border-sky-100 bg-white/90 p-2 shadow-sm md:self-auto">
-            <Filter className="h-4 w-4 text-sky-600" />
-            <select value={checkupType} onChange={(e) => setCheckupType(e.target.value)} className="bg-transparent p-1 text-xs font-bold text-slate-700 outline-none">
-              <option value="">كل أنواع الكشف</option>
-              {checkupTypes.map((title) => <option key={title} value={title}>{title}</option>)}
-            </select>
-          </div>
-          <div className="flex items-center justify-between border-b border-violet-100 p-6"><div><h3 className="font-bold text-slate-900">مقارنة الإيرادات بحسب نوع الكشف</h3><p className="mt-1 text-xs text-slate-400">مصدر البيانات: Visits / title</p></div><Stethoscope className="h-5 w-5 text-violet-600" /></div>
-
-          <div className="overflow-x-auto"><table className="min-w-[720px] w-full text-right"><thead className="bg-violet-50/50 text-xs font-bold text-slate-600"><tr><th className="p-4">نوع الكشف</th><th className="p-4">عدد الأشخاص</th><th className="p-4">عدد الكشوف</th><th className="p-4">إجمالي الإيراد</th><th className="p-4">متوسط الإيراد / كشف</th></tr></thead><tbody className="divide-y divide-slate-100 text-sm">{checkupSummary.length ? checkupSummary.map((row) => <tr key={row.name} className="hover:bg-violet-50/30"><td className="p-4 font-bold text-slate-800">{row.name}</td><td className="p-4">{Number(row.people).toLocaleString('ar-EG')} شخص</td><td className="p-4">{Number(row.visits).toLocaleString('ar-EG')} كشف</td><td className="p-4 font-black text-violet-800">{Number(row.revenue).toLocaleString('ar-EG')} ج</td><td className="p-4 text-slate-600">{row.visits ? Math.round(row.revenue / row.visits).toLocaleString('ar-EG') : 0} ج</td></tr>) : <tr><td colSpan={5} className="p-8 text-center text-sm text-slate-400">لا توجد كشوف مكتملة مطابقة للفلتر الحالي.</td></tr>}</tbody></table></div>
-
-        </motion.section>
-
       </div>
-    </div>
+    </section>
   );
 }

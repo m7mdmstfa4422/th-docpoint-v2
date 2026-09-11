@@ -19,6 +19,8 @@ import SubscriptionProvider, { SubscriptionContext } from './SubscriptionProvide
 import SubscriptionRenewal from './components/SubscriptionRenewal/SubscriptionRenewal';
 import DeveloperConsole from './components/DeveloperConsole/DeveloperConsole';
 import Appointments from './components/Appointments/Appointments';
+import Indebtedness from './components/Indebtedness/Indebtedness';
+import NotificationProvider from './NotificationContext';
 
 const UnderDevelopment = () => (
   <div className="grid min-h-[45vh] place-items-center rounded-3xl border border-dashed border-slate-300 bg-white p-8 text-center">
@@ -55,6 +57,8 @@ function AnimatedRoutes() {
           <Route path="/search" element={isAuthenticated ? <PatientSearch /> : <Navigate to="/Login" replace />} />
           <Route path="/appointments" element={isAuthenticated ? <Appointments /> : <Navigate to="/Login" replace />} />
           <Route path="/finance" element={isDoctor ? <FinancialDashboard /> : <Navigate to="/register" replace />} />
+          <Route path="/Indebtedness" element={isDoctor ? <Indebtedness /> : <Navigate to="/register" replace />} />
+          <Route path="/indebtedness" element={isDoctor ? <Indebtedness /> : <Navigate to="/register" replace />} />
           <Route path="/patient-profile/:id" element={isAuthenticated ? <PatientProfile /> : <Navigate to="/Login" replace />} />
           <Route path="/operations" element={isAuthenticated ? <UnderDevelopment /> : <Navigate to="/Login" replace />} />
           <Route path="/reports" element={isDoctor ? <Reports /> : <Navigate to="/register" replace />} />
@@ -68,12 +72,40 @@ function AnimatedRoutes() {
 
 function Layout() {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem('clinic_sidebar_collapsed') === 'true';
+    } catch {
+      return false;
+    }
+  });
   const { isAuthenticated } = useContext(AuthContext);
+
+  const toggleSidebarCollapse = () => {
+    setSidebarCollapsed((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem('clinic_sidebar_collapsed', String(next));
+      } catch {}
+      return next;
+    });
+  };
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900" dir="rtl">
-      {isAuthenticated && <Sidebar open={menuOpen} onClose={() => setMenuOpen(false)} />}
-      <div className={`min-h-screen ${isAuthenticated ? 'lg:mr-64' : ''}`}>
+      {isAuthenticated && (
+        <Sidebar
+          open={menuOpen}
+          onClose={() => setMenuOpen(false)}
+          collapsed={sidebarCollapsed}
+          onToggleCollapse={toggleSidebarCollapse}
+        />
+      )}
+      <div
+        className={`min-h-screen transition-[margin] duration-300 ease-[cubic-bezier(.22,1,.36,1)] ${
+          isAuthenticated ? (sidebarCollapsed ? 'lg:mr-24' : 'lg:mr-72') : ''
+        }`}
+      >
         {isAuthenticated && <Topbar onMenuClick={() => setMenuOpen(true)} />}
         <main className="">
           <AnimatedRoutes />
@@ -85,6 +117,16 @@ function Layout() {
 
 export default function App() {
   return (
-    <AuthProvider><SubscriptionProvider><UiFeedback><BrowserRouter><Layout /></BrowserRouter></UiFeedback></SubscriptionProvider></AuthProvider>
+    <AuthProvider>
+      <SubscriptionProvider>
+        <NotificationProvider>
+          <UiFeedback>
+            <BrowserRouter>
+              <Layout />
+            </BrowserRouter>
+          </UiFeedback>
+        </NotificationProvider>
+      </SubscriptionProvider>
+    </AuthProvider>
   );
 }
