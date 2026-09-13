@@ -13,4 +13,4 @@ const patientSchema = new mongoose.Schema({
   medicalNotes: { type: String, trim: true, default: '' },
 }, { timestamps: true });
 
-export default mongoose.model('Patient', patientSchema);
+export default mongoose.models.Patient || mongoose.model('Patient', patientSchema);

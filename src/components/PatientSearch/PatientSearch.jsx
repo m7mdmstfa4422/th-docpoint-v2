@@ -6,6 +6,8 @@ import {
   Building2,
   Calendar,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   ExternalLink,
   FileText,
   Filter,
@@ -29,6 +31,9 @@ import { api } from '../../api';
 const SIGNATURE_GRADIENT =
   'linear-gradient(135deg, rgb(3, 105, 161) 0%, rgb(2, 132, 199) 50%, rgb(14, 165, 233) 100%)';
 
+/* ─── Pagination Constants ─── */
+const ITEMS_PER_PAGE = 12;
+
 /* ─── Helpers ─── */
 function getInitials(name) {
   if (!name) return '؟';
@@ -51,6 +56,7 @@ export default function PatientSearch() {
   const [clinicFilter, setClinicFilter] = useState('all'); // 'all' | clinicId
   const [sortBy, setSortBy] = useState('newest'); // 'newest' | 'name' | 'age'
   const [viewMode, setViewMode] = useState('grid'); // 'grid' | 'table'
+  const [currentPage, setCurrentPage] = useState(1);
 
   /* ─── Load Patients & Clinics ─── */
   const loadData = useCallback(async (isManual = false) => {
@@ -118,6 +124,20 @@ export default function PatientSearch() {
     return list;
   }, [patients, search, genderFilter, clinicFilter, sortBy]);
 
+  /* ─── Reset to page 1 when filters change ─── */
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [search, genderFilter, clinicFilter]);
+
+  /* ─── Pagination Computed Values ─── */
+  const totalPages = Math.ceil(filteredPatients.length / ITEMS_PER_PAGE);
+  const displayedPatients = filteredPatients.slice(
+    (currentPage - 1) * ITEMS_PER_PAGE,
+    currentPage * ITEMS_PER_PAGE
+  );
+  const startIndex = filteredPatients.length === 0 ? 0 : (currentPage - 1) * ITEMS_PER_PAGE + 1;
+  const endIndex = Math.min(currentPage * ITEMS_PER_PAGE, filteredPatients.length);
+
   /* ─── Demographic Stats ─── */
   const stats = useMemo(() => {
     const total = patients.length;
@@ -150,6 +170,70 @@ export default function PatientSearch() {
     const message = `مرحباً أستاذ/ة ${patientName}،\nنتمنى لكم دوام الصحة والعافية من فريق ${clinicName}.\nنسعد دائماً بالتواصل معكم وتقديم أفضل رعاية طبية.`;
 
     window.open(`https://wa.me/${cleanPhone}?text=${encodeURIComponent(message)}`, '_blank');
+  };
+
+  /* ─── Pagination Handlers ─── */
+  const handlePageChange = (newPage) => {
+    setCurrentPage(newPage);
+    // Smooth scroll to top of patient grid
+    const gridElement = document.getElementById('printable-patient-list');
+    if (gridElement) {
+      const offset = gridElement.getBoundingClientRect().top + window.pageYOffset - 20;
+      window.scrollTo({ top: offset, behavior: 'smooth' });
+    }
+  };
+
+  const renderPageNumbers = () => {
+    if (totalPages <= 1) return null;
+
+    const pages = [];
+    const maxVisiblePages = 7;
+
+    if (totalPages <= maxVisiblePages) {
+      // Show all pages
+      for (let i = 1; i <= totalPages; i++) {
+        pages.push(i);
+      }
+    } else {
+      // Smart truncation with ellipsis
+      if (currentPage <= 4) {
+        // Near start: 1 2 3 4 5 ... last
+        pages.push(1, 2, 3, 4, 5, '...', totalPages);
+      } else if (currentPage >= totalPages - 3) {
+        // Near end: 1 ... n-4 n-3 n-2 n-1 n
+        pages.push(1, '...', totalPages - 4, totalPages - 3, totalPages - 2, totalPages - 1, totalPages);
+      } else {
+        // Middle: 1 ... current-1 current current+1 ... last
+        pages.push(1, '...', currentPage - 1, currentPage, currentPage + 1, '...', totalPages);
+      }
+    }
+
+    return pages.map((page, idx) => {
+      if (page === '...') {
+        return (
+          <span key={`ellipsis-${idx}`} className="px-2 text-slate-400 text-sm">
+            ...
+          </span>
+        );
+      }
+
+      const isActive = page === currentPage;
+      return (
+        <button
+          key={page}
+          type="button"
+          onClick={() => handlePageChange(page)}
+          className={`h-9 min-w-[2.25rem] rounded-xl px-3 text-xs font-bold transition ${
+            isActive
+              ? 'text-white shadow-sm'
+              : 'border border-slate-200 text-slate-700 hover:bg-slate-100'
+          }`}
+          style={isActive ? { background: SIGNATURE_GRADIENT } : {}}
+        >
+          {page}
+        </button>
+      );
+    });
   };
 
   return (
@@ -521,8 +605,8 @@ export default function PatientSearch() {
           ) : viewMode === 'grid' ? (
             /* ─── Grid View ─── */
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              <AnimatePresence mode="popLayout">
-                {filteredPatients.map((patient) => {
+              <AnimatePresence mode="wait">
+                {displayedPatients.map((patient) => {
                   const initials = getInitials(patient.fullName);
                   const isFemale = patient.gender === 'أنثى';
 
@@ -706,7 +790,7 @@ export default function PatientSearch() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {filteredPatients.map((patient) => {
+                    {displayedPatients.map((patient) => {
                       const initials = getInitials(patient.fullName);
                       const isFemale = patient.gender === 'أنثى';
 
@@ -815,6 +899,53 @@ export default function PatientSearch() {
                 </table>
               </div>
             </div>
+          )}
+
+          {/* ─── Pagination Controls ─── */}
+          {totalPages > 1 && (
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="mt-6 flex flex-col gap-3 rounded-3xl border border-slate-200/80 bg-white/95 p-4 shadow-sm shadow-slate-200/50 backdrop-blur-md sm:flex-row sm:items-center sm:justify-between"
+            >
+              {/* Results Counter */}
+              <div className="text-center text-xs text-slate-600 sm:text-right">
+                <span className="font-semibold">
+                  عرض {startIndex} - {endIndex}
+                </span>
+                <span className="mx-1 text-slate-400">من أصل</span>
+                <span className="font-bold text-slate-900">{filteredPatients.length}</span>
+                <span className="mr-1 text-slate-400">مريض</span>
+              </div>
+
+              {/* Page Navigation */}
+              <div className="flex items-center justify-center gap-2">
+                {/* Previous Button */}
+                <button
+                  type="button"
+                  onClick={() => handlePageChange(currentPage - 1)}
+                  disabled={currentPage === 1}
+                  title="الصفحة السابقة"
+                  className="flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-white"
+                >
+                  <ChevronRight size={16} />
+                </button>
+
+                {/* Page Numbers */}
+                <div className="flex items-center gap-1.5">{renderPageNumbers()}</div>
+
+                {/* Next Button */}
+                <button
+                  type="button"
+                  onClick={() => handlePageChange(currentPage + 1)}
+                  disabled={currentPage === totalPages}
+                  title="الصفحة التالية"
+                  className="flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-white"
+                >
+                  <ChevronLeft size={16} />
+                </button>
+              </div>
+            </motion.div>
           )}
         </section>
       </div>

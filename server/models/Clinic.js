@@ -8,4 +8,4 @@ const clinicSchema = new mongoose.Schema({
   active: { type: Boolean, default: true },
 }, { timestamps: true });
 
-export default mongoose.model('Clinic', clinicSchema);
+export default mongoose.models.Clinic || mongoose.model('Clinic', clinicSchema);

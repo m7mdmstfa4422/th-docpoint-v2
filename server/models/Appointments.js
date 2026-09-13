@@ -8,4 +8,4 @@ const appointmentSchema = new mongoose.Schema({
   createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'Admin', required: true },
 }, { timestamps: true });
 
-export default mongoose.model('Appointment', appointmentSchema);
+export default mongoose.models.Appointment || mongoose.model('Appointment', appointmentSchema);

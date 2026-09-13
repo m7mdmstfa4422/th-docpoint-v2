@@ -15,12 +15,24 @@ import Appointment from './models/Appointments.js';
 import ExternalDebt from './models/ExternalDebt.js';
 import Notification from './models/Notification.js';
 import { createNotification, addSseClient, removeSseClient } from './utils/notifications.js';
+import { connectToDatabase } from './db.js';
 
-const app = express(); 
+const app = express();
 const port = process.env.PORT || 5000;
 
-app.use(cors()); 
+app.use(cors());
 app.use(express.json());
+
+// Database connection middleware - ensures cached DB connection for every request
+app.use(async (req, res, next) => {
+  try {
+    await connectToDatabase();
+    next();
+  } catch (error) {
+    console.error('[DB Middleware] Database connection failure:', error.message);
+    res.status(500).json({ error: 'Database connection failure. Please try again.' });
+  }
+});
 
 const token = (admin) => {
   const secret = process.env.JWT_SECRET;
@@ -1236,20 +1248,15 @@ app.use((error, _req, res, _next) => {
   res.status(500).json({ message: 'حدث خطأ في الخادم.', error: error.message }); 
 });
 
-if (!process.env.MONGODB_URI || !process.env.JWT_SECRET) { 
-  console.error('أكمل MONGODB_URI و JWT_SECRET في .env'); 
-  process.exit(1); 
-}
-
-// الاتصال بقاعدة البيانات
-mongoose.connect(process.env.MONGODB_URI, { serverSelectionTimeoutMS: 10000 })
-  .then(async () => { 
+// Seed default database collections if empty
+async function seedInitialData() {
+  try {
     if (!await Clinic.countDocuments()) {
       await Clinic.insertMany([
-        { name: 'عيادة الأسنان', location: 'الفرع الرئيسي', specialty: 'طب الأسنان' }, 
-        { name: 'عيادة الأطفال', location: 'الفرع الرئيسي', specialty: 'طب الأطفال' }, 
+        { name: 'عيادة الأسنان', location: 'الفرع الرئيسي', specialty: 'طب الأسنان' },
+        { name: 'عيادة الأطفال', location: 'الفرع الرئيسي', specialty: 'طب الأطفال' },
         { name: 'عيادة الباطنة', location: 'الفرع الرئيسي', specialty: 'باطنة عامة' }
-      ]); 
+      ]);
     }
 
     try {
@@ -1264,23 +1271,23 @@ mongoose.connect(process.env.MONGODB_URI, { serverSelectionTimeoutMS: 10000 })
       console.warn('Seeding checkup types notice:', err.message);
     }
 
-    if (!await Admin.countDocuments()) { 
-      const passwordHash = await bcrypt.hash(process.env.ADMIN_SEED_PASSWORD || 'ChangeMeNow123!', 12); 
+    if (!await Admin.countDocuments()) {
+      const passwordHash = await bcrypt.hash(process.env.ADMIN_SEED_PASSWORD || 'ChangeMeNow123!', 12);
       await Admin.insertMany([
-        { username: 'drahmed', name: 'د. أحمد', role: 'doctor', passwordHash }, 
-        { username: 'admin1', name: 'مدير العيادات', passwordHash }, 
-        { username: 'admin2', name: 'مدير الحسابات', passwordHash }, 
+        { username: 'drahmed', name: 'د. أحمد', role: 'doctor', passwordHash },
+        { username: 'admin1', name: 'مدير العيادات', passwordHash },
+        { username: 'admin2', name: 'مدير الحسابات', passwordHash },
         { username: 'admin3', name: 'مدير الاستقبال', passwordHash }
-      ]); 
-    } 
+      ]);
+    }
 
     if (!await Admin.exists({ username: 'developer' })) {
-      await Admin.create({ 
-        username: 'developer', 
-        name: 'مطور النظام', 
-        role: 'developer', 
-        passwordHash: await bcrypt.hash(process.env.DEVELOPER_SEED_PASSWORD || 'DevClinic!2026', 12) 
-      }); 
+      await Admin.create({
+        username: 'developer',
+        name: 'مطور النظام',
+        role: 'developer',
+        passwordHash: await bcrypt.hash(process.env.DEVELOPER_SEED_PASSWORD || 'DevClinic!2026', 12)
+      });
     }
 
     if (!await Subscription.countDocuments()) {
@@ -1302,14 +1309,26 @@ mongoose.connect(process.env.MONGODB_URI, { serverSelectionTimeoutMS: 10000 })
     } catch (err) {
       console.warn('Seeding notification notice:', err.message);
     }
+  } catch (err) {
+    console.warn('[DB Seed] Seeding notice:', err.message);
+  }
+}
 
-    if (!process.env.VERCEL) {
-      app.listen(port, () => console.log(`API running at http://localhost:${port}`)); 
-    }
-  })
-  .catch((e) => { 
-    console.error(`تعذر الاتصال بـ MongoDB Atlas: ${e.message}`); 
-    if (!process.env.VERCEL) process.exit(1); 
-  });
+// Local server startup
+if (!process.env.VERCEL) {
+  if (!process.env.MONGODB_URI || !process.env.JWT_SECRET) {
+    console.warn('تنبيه: تأكد من ضبط MONGODB_URI و JWT_SECRET في ملف .env');
+  }
+
+  connectToDatabase()
+    .then(async () => {
+      await seedInitialData();
+      app.listen(port, () => console.log(`API running at http://localhost:${port}`));
+    })
+    .catch((e) => {
+      console.error(`تعذر الاتصال بـ MongoDB Atlas عند بدء التشغيل المحلي: ${e.message}`);
+      app.listen(port, () => console.log(`API running at http://localhost:${port} (Waiting for MongoDB connection...)`));
+    });
+}
 
 export default app;

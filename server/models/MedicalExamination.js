@@ -5,4 +5,4 @@ const medicalExaminationSchema = new mongoose.Schema({
   active: { type: Boolean, default: true },
 }, { timestamps: true });
 
-export default mongoose.model('MedicalExamination', medicalExaminationSchema);
+export default mongoose.models.MedicalExamination || mongoose.model('MedicalExamination', medicalExaminationSchema);

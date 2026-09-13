@@ -17,4 +17,4 @@ const visitSchema = new mongoose.Schema({
   visitDate: { type: Date, default: Date.now },
 }, { timestamps: true });
 
-export default mongoose.model('Visit', visitSchema);
+export default mongoose.models.Visit || mongoose.model('Visit', visitSchema);

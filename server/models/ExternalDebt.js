@@ -42,5 +42,5 @@ externalDebtSchema.pre('save', function (next) {
   next();
 });
 
-export default mongoose.model('ExternalDebt', externalDebtSchema);
+export default mongoose.models.ExternalDebt || mongoose.model('ExternalDebt', externalDebtSchema);
 
