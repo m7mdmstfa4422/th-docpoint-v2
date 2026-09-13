@@ -358,15 +358,72 @@ app.get('/api/reports/checkup-types', auth, async (_req, res, next) => {
   } catch (error) { next(error); }
 });
 
-// Patients Routes
-app.get('/api/patients', auth, async (req, res, next) => { 
-  try { 
-    const s = req.query.search?.trim(); 
-    const q = s ? { $or: [{ fullName: { $regex: s, $options: 'i' } }, { phone: { $regex: s, $options: 'i' } }, { nationalId: { $regex: s, $options: 'i' } }] } : {}; 
-    res.json(await Patient.find(q).populate('clinic', 'name location').populate('createdBy', 'name username').sort({ createdAt: -1 }).limit(100)); 
-  } catch (error) { 
-    next(error); 
-  } 
+// Patients Routes (Server-Side Pagination & High-Performance Indexing)
+app.get('/api/patients', auth, async (req, res, next) => {
+  try {
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = Math.max(1, Math.min(100, parseInt(req.query.limit, 10) || 9));
+    const skip = (page - 1) * limit;
+
+    const s = req.query.search?.trim();
+    const q = {};
+
+    if (s) {
+      q.$or = [
+        { fullName: { $regex: s, $options: 'i' } },
+        { phone: { $regex: s, $options: 'i' } },
+        { nationalId: { $regex: s, $options: 'i' } }
+      ];
+    }
+
+    if (req.query.gender && req.query.gender !== 'all') {
+      q.gender = req.query.gender;
+    }
+
+    if (req.query.clinic && req.query.clinic !== 'all') {
+      q.clinic = req.query.clinic;
+    }
+
+    // Sort order: Strictly sort by newest registration date first
+    let sortOption = { createdAt: -1, _id: -1 };
+    if (req.query.sortBy === 'name') {
+      sortOption = { fullName: 1, _id: -1 };
+    } else if (req.query.sortBy === 'age') {
+      sortOption = { age: -1, _id: -1 };
+    }
+
+    const [patients, totalPatients, totalMales, totalFemales] = await Promise.all([
+      Patient.find(q)
+        .populate('clinic', 'name location')
+        .populate('createdBy', 'name username')
+        .sort(sortOption)
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+      Patient.countDocuments(q),
+      Patient.countDocuments({ ...q, gender: 'ذكر' }),
+      Patient.countDocuments({ ...q, gender: 'أنثى' })
+    ]);
+
+    const totalPages = Math.ceil(totalPatients / limit) || 1;
+
+    res.json({
+      patients,
+      pagination: {
+        totalPatients,
+        totalPages,
+        currentPage: page,
+        limit
+      },
+      stats: {
+        total: totalPatients,
+        males: totalMales,
+        females: totalFemales
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
 });
 
 app.post('/api/patients', auth, async (req, res, next) => { 

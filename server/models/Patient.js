@@ -13,4 +13,11 @@ const patientSchema = new mongoose.Schema({
   medicalNotes: { type: String, trim: true, default: '' },
 }, { timestamps: true });
 
+// Optimize query & sorting indexes for high-scale pagination
+patientSchema.index({ createdAt: -1 });
+patientSchema.index({ fullName: 1 });
+patientSchema.index({ phone: 1 });
+patientSchema.index({ gender: 1, createdAt: -1 });
+patientSchema.index({ clinic: 1, createdAt: -1 });
+
 export default mongoose.models.Patient || mongoose.model('Patient', patientSchema);

@@ -31,14 +31,56 @@ import { api } from '../../api';
 const SIGNATURE_GRADIENT =
   'linear-gradient(135deg, rgb(3, 105, 161) 0%, rgb(2, 132, 199) 50%, rgb(14, 165, 233) 100%)';
 
-/* ─── Pagination Constants ─── */
-const ITEMS_PER_PAGE = 12;
+/* ─── Strict Pagination Limit (9 Patients Per Page) ─── */
+const PAGE_SIZE = 9;
 
 /* ─── Helpers ─── */
 function getInitials(name) {
   if (!name) return '؟';
   const parts = name.trim().split(/\s+/);
   return parts.length >= 2 ? parts[0][0] + parts[1][0] : parts[0].slice(0, 2);
+}
+
+/* ─── Skeleton Loading Cards (9 Items) ─── */
+function PatientCardSkeleton() {
+  return (
+    <div className="flex flex-col justify-between rounded-3xl border border-slate-200/80 bg-white/95 p-5 shadow-2xs animate-pulse">
+      <div>
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="h-12 w-12 rounded-2xl bg-slate-200" />
+            <div className="space-y-2">
+              <div className="h-4 w-32 rounded-md bg-slate-200" />
+              <div className="h-3 w-20 rounded-md bg-slate-100" />
+            </div>
+          </div>
+          <div className="h-8 w-8 rounded-xl bg-slate-100" />
+        </div>
+
+        <div className="mt-4 grid grid-cols-2 gap-2 border-t border-slate-100 pt-3">
+          <div className="rounded-2xl border border-slate-100 bg-slate-50/70 p-2.5 space-y-1.5">
+            <div className="h-2.5 w-12 rounded bg-slate-200" />
+            <div className="h-3.5 w-24 rounded bg-slate-200" />
+          </div>
+          <div className="rounded-2xl border border-slate-100 bg-slate-50/70 p-2.5 space-y-1.5">
+            <div className="h-2.5 w-12 rounded bg-slate-200" />
+            <div className="h-3.5 w-20 rounded bg-slate-200" />
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-4 border-t border-slate-100 pt-3">
+        <div className="flex items-center justify-between">
+          <div className="h-8 w-24 rounded-xl bg-slate-100" />
+          <div className="h-8 w-24 rounded-xl bg-slate-200" />
+        </div>
+        <div className="mt-2.5 flex items-center justify-between">
+          <div className="h-2.5 w-28 rounded bg-slate-100" />
+          <div className="h-2.5 w-14 rounded bg-slate-100" />
+        </div>
+      </div>
+    </div>
+  );
 }
 
 export default function PatientSearch() {
@@ -49,111 +91,139 @@ export default function PatientSearch() {
   const [clinics, setClinics] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [search, setSearch] = useState('');
+  const [isPageChanging, setIsPageChanging] = useState(false);
+
+  /* ─── Search & Debounce State ─── */
+  const [searchInput, setSearchInput] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
 
   /* ─── Filter & Display State ─── */
   const [genderFilter, setGenderFilter] = useState('all'); // 'all' | 'ذكر' | 'أنثى'
   const [clinicFilter, setClinicFilter] = useState('all'); // 'all' | clinicId
   const [sortBy, setSortBy] = useState('newest'); // 'newest' | 'name' | 'age'
   const [viewMode, setViewMode] = useState('grid'); // 'grid' | 'table'
+
+  /* ─── Server-Side Pagination State ─── */
   const [currentPage, setCurrentPage] = useState(1);
+  const [pagination, setPagination] = useState({
+    totalPatients: 0,
+    totalPages: 1,
+    currentPage: 1,
+    limit: PAGE_SIZE,
+  });
 
-  /* ─── Load Patients & Clinics ─── */
-  const loadData = useCallback(async (isManual = false) => {
-    if (isManual) setRefreshing(true);
-    else setLoading(true);
+  /* ─── Demographic Stats from Server ─── */
+  const [stats, setStats] = useState({
+    total: 0,
+    males: 0,
+    females: 0,
+    malePct: 0,
+    femalePct: 0,
+    clinicsCount: 0,
+  });
 
-    try {
-      const [patientsRes, clinicsRes] = await Promise.all([
-        api('/patients', { showLoading: false }),
-        api('/clinics', { showLoading: false }).catch(() => []),
-      ]);
-
-      setPatients(Array.isArray(patientsRes) ? patientsRes : patientsRes?.patients || []);
-      setClinics(Array.isArray(clinicsRes) ? clinicsRes : []);
-    } catch (error) {
-      console.error('Error loading patients:', error);
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }, []);
-
+  /* ─── Debounce Search Input (350ms) ─── */
   useEffect(() => {
-    loadData();
-  }, [loadData]);
+    const timer = setTimeout(() => {
+      setDebouncedSearch(searchInput.trim());
+    }, 350);
 
-  /* ─── Live Filter & Sort ─── */
-  const filteredPatients = useMemo(() => {
-    let list = [...patients];
+    return () => clearTimeout(timer);
+  }, [searchInput]);
 
-    // Search query filter (name, phone, national ID, clinic name)
-    if (search.trim()) {
-      const q = search.trim().toLowerCase();
-      list = list.filter((p) => {
-        const name = String(p.fullName || '').toLowerCase();
-        const phone = String(p.phone || '').toLowerCase();
-        const natId = String(p.nationalId || '').toLowerCase();
-        const clinicName = String(p.clinic?.name || '').toLowerCase();
-        return name.includes(q) || phone.includes(q) || natId.includes(q) || clinicName.includes(q);
-      });
-    }
-
-    // Gender filter
-    if (genderFilter !== 'all') {
-      list = list.filter((p) => p.gender === genderFilter);
-    }
-
-    // Clinic filter
-    if (clinicFilter !== 'all') {
-      list = list.filter((p) => String(p.clinic?._id || p.clinic) === clinicFilter);
-    }
-
-    // Sorting
-    list.sort((a, b) => {
-      if (sortBy === 'name') {
-        return (a.fullName || '').localeCompare(b.fullName || '', 'ar');
-      }
-      if (sortBy === 'age') {
-        return (b.age || 0) - (a.age || 0);
-      }
-      // newest default (createdAt)
-      return new Date(b.createdAt || 0) - new Date(a.createdAt || 0);
-    });
-
-    return list;
-  }, [patients, search, genderFilter, clinicFilter, sortBy]);
-
-  /* ─── Reset to page 1 when filters change ─── */
+  /* ─── Reset to Page 1 on Query / Filter Change ─── */
   useEffect(() => {
     setCurrentPage(1);
-  }, [search, genderFilter, clinicFilter]);
+  }, [debouncedSearch, genderFilter, clinicFilter, sortBy]);
 
-  /* ─── Pagination Computed Values ─── */
-  const totalPages = Math.ceil(filteredPatients.length / ITEMS_PER_PAGE);
-  const displayedPatients = filteredPatients.slice(
-    (currentPage - 1) * ITEMS_PER_PAGE,
-    currentPage * ITEMS_PER_PAGE
+  /* ─── Fetch Server-Side Paginated Patients ─── */
+  const fetchPatients = useCallback(
+    async (isManual = false) => {
+      if (isManual) {
+        setRefreshing(true);
+      } else if (patients.length > 0) {
+        setIsPageChanging(true);
+      } else {
+        setLoading(true);
+      }
+
+      try {
+        const params = new URLSearchParams({
+          page: String(currentPage),
+          limit: String(PAGE_SIZE),
+        });
+
+        if (debouncedSearch) params.append('search', debouncedSearch);
+        if (genderFilter !== 'all') params.append('gender', genderFilter);
+        if (clinicFilter !== 'all') params.append('clinic', clinicFilter);
+        if (sortBy) params.append('sortBy', sortBy);
+
+        const [patientsRes, clinicsRes] = await Promise.all([
+          api(`/patients?${params.toString()}`, { showLoading: false }),
+          clinics.length === 0
+            ? api('/clinics', { showLoading: false }).catch(() => [])
+            : Promise.resolve(null),
+        ]);
+
+        if (clinicsRes && Array.isArray(clinicsRes)) {
+          setClinics(clinicsRes);
+        }
+
+        if (patientsRes) {
+          const patientList = Array.isArray(patientsRes)
+            ? patientsRes
+            : patientsRes.patients || [];
+          setPatients(patientList);
+
+          if (patientsRes.pagination) {
+            setPagination(patientsRes.pagination);
+          } else {
+            setPagination({
+              totalPatients: patientList.length,
+              totalPages: Math.ceil(patientList.length / PAGE_SIZE) || 1,
+              currentPage,
+              limit: PAGE_SIZE,
+            });
+          }
+
+          if (patientsRes.stats) {
+            const total = patientsRes.stats.total ?? patientList.length;
+            const males = patientsRes.stats.males ?? 0;
+            const females = patientsRes.stats.females ?? 0;
+            setStats({
+              total,
+              males,
+              females,
+              malePct: total > 0 ? Math.round((males / total) * 100) : 0,
+              femalePct: total > 0 ? Math.round((females / total) * 100) : 0,
+              clinicsCount: clinicsRes?.length || clinics.length || 0,
+            });
+          } else {
+            setStats((prev) => ({
+              ...prev,
+              total: patientList.length,
+            }));
+          }
+        }
+      } catch (error) {
+        console.error('Error loading patients:', error);
+      } finally {
+        setLoading(false);
+        setRefreshing(false);
+        setIsPageChanging(false);
+      }
+    },
+    [currentPage, debouncedSearch, genderFilter, clinicFilter, sortBy, clinics.length, patients.length]
   );
-  const startIndex = filteredPatients.length === 0 ? 0 : (currentPage - 1) * ITEMS_PER_PAGE + 1;
-  const endIndex = Math.min(currentPage * ITEMS_PER_PAGE, filteredPatients.length);
 
-  /* ─── Demographic Stats ─── */
-  const stats = useMemo(() => {
-    const total = patients.length;
-    const males = patients.filter((p) => p.gender === 'ذكر').length;
-    const females = patients.filter((p) => p.gender === 'أنثى').length;
-    const clinicsCount = clinics.length || new Set(patients.map((p) => p.clinic?._id || p.clinic).filter(Boolean)).size;
+  useEffect(() => {
+    fetchPatients();
+  }, [fetchPatients]);
 
-    return {
-      total,
-      males,
-      females,
-      malePct: total > 0 ? Math.round((males / total) * 100) : 0,
-      femalePct: total > 0 ? Math.round((females / total) * 100) : 0,
-      clinicsCount,
-    };
-  }, [patients, clinics]);
+  /* ─── Pagination Computed Indicators ─── */
+  const totalCount = pagination.totalPatients || 0;
+  const startItem = totalCount === 0 ? 0 : (currentPage - 1) * PAGE_SIZE + 1;
+  const endItem = Math.min(currentPage * PAGE_SIZE, totalCount);
 
   /* ─── WhatsApp Quick Message ─── */
   const handleWhatsApp = (patient) => {
@@ -172,46 +242,37 @@ export default function PatientSearch() {
     window.open(`https://wa.me/${cleanPhone}?text=${encodeURIComponent(message)}`, '_blank');
   };
 
-  /* ─── Pagination Handlers ─── */
+  /* ─── Smooth Page Transition Handler ─── */
   const handlePageChange = (newPage) => {
+    if (newPage < 1 || newPage > pagination.totalPages || newPage === currentPage) return;
     setCurrentPage(newPage);
-    // Smooth scroll to top of patient grid
-    const gridElement = document.getElementById('printable-patient-list');
-    if (gridElement) {
-      const offset = gridElement.getBoundingClientRect().top + window.pageYOffset - 20;
-      window.scrollTo({ top: offset, behavior: 'smooth' });
-    }
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  const renderPageNumbers = () => {
-    if (totalPages <= 1) return null;
+  /* ─── Smart Pagination Range Generator ([1] ... [4] [5*] [6] ... [536]) ─── */
+  const renderPaginationButtons = () => {
+    const total = pagination.totalPages;
+    if (total <= 1) return null;
 
     const pages = [];
-    const maxVisiblePages = 7;
+    const maxVisible = 7;
 
-    if (totalPages <= maxVisiblePages) {
-      // Show all pages
-      for (let i = 1; i <= totalPages; i++) {
+    if (total <= maxVisible) {
+      for (let i = 1; i <= total; i++) {
         pages.push(i);
       }
+    } else if (currentPage <= 4) {
+      pages.push(1, 2, 3, 4, 5, '...', total);
+    } else if (currentPage >= total - 3) {
+      pages.push(1, '...', total - 4, total - 3, total - 2, total - 1, total);
     } else {
-      // Smart truncation with ellipsis
-      if (currentPage <= 4) {
-        // Near start: 1 2 3 4 5 ... last
-        pages.push(1, 2, 3, 4, 5, '...', totalPages);
-      } else if (currentPage >= totalPages - 3) {
-        // Near end: 1 ... n-4 n-3 n-2 n-1 n
-        pages.push(1, '...', totalPages - 4, totalPages - 3, totalPages - 2, totalPages - 1, totalPages);
-      } else {
-        // Middle: 1 ... current-1 current current+1 ... last
-        pages.push(1, '...', currentPage - 1, currentPage, currentPage + 1, '...', totalPages);
-      }
+      pages.push(1, '...', currentPage - 1, currentPage, currentPage + 1, '...', total);
     }
 
     return pages.map((page, idx) => {
       if (page === '...') {
         return (
-          <span key={`ellipsis-${idx}`} className="px-2 text-slate-400 text-sm">
+          <span key={`ellipsis-${idx}`} className="px-1.5 text-slate-400 text-xs font-bold select-none">
             ...
           </span>
         );
@@ -223,14 +284,15 @@ export default function PatientSearch() {
           key={page}
           type="button"
           onClick={() => handlePageChange(page)}
-          className={`h-9 min-w-[2.25rem] rounded-xl px-3 text-xs font-bold transition ${
+          disabled={isPageChanging}
+          className={`h-9 min-w-[2.25rem] rounded-xl px-3 text-xs font-black transition-all ${
             isActive
-              ? 'text-white shadow-sm'
-              : 'border border-slate-200 text-slate-700 hover:bg-slate-100'
+              ? 'text-white shadow-sm ring-2 ring-sky-300/40'
+              : 'border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 active:scale-95'
           }`}
           style={isActive ? { background: SIGNATURE_GRADIENT } : {}}
         >
-          {page}
+          {page.toLocaleString('ar-EG')}
         </button>
       );
     });
@@ -254,12 +316,10 @@ export default function PatientSearch() {
           animate={{ opacity: 1, y: 0 }}
           className="relative overflow-hidden rounded-3xl border border-slate-200/80 bg-white/95 p-6 shadow-sm shadow-slate-200/50 backdrop-blur-md md:p-8"
         >
-          {/* Ambient Lighting Circles */}
           <div className="pointer-events-none absolute -left-20 -top-20 h-64 w-64 rounded-full bg-sky-100/50 blur-3xl" />
           <div className="pointer-events-none absolute -right-20 -bottom-20 h-64 w-64 rounded-full bg-indigo-100/40 blur-3xl" />
 
           <div className="relative flex flex-col gap-5 md:flex-row md:items-center md:justify-between">
-            {/* Title & Info */}
             <div>
               <div className="flex items-center gap-2">
                 <span className="inline-flex items-center gap-1.5 rounded-full border border-sky-100 bg-sky-50 px-3 py-1 text-xs font-bold text-sky-700">
@@ -268,7 +328,7 @@ export default function PatientSearch() {
                 </span>
                 <span className="inline-flex items-center gap-1 rounded-full border border-emerald-100 bg-emerald-50 px-2.5 py-0.5 text-[11px] font-bold text-emerald-700">
                   <span className="h-1.5 w-1.5 rounded-full bg-[#38C698] animate-pulse" />
-                  {patients.length} ملف نشط
+                  {totalCount.toLocaleString('ar-EG')} ملف نشط
                 </span>
               </div>
 
@@ -277,7 +337,7 @@ export default function PatientSearch() {
               </h1>
               <p className="mt-1.5 text-xs text-slate-500 md:text-sm">
                 بحث فوري واستعراض شامل لقاعدة بيانات المرضى، التاريخ العلاجي، والوصول السريع
-                للتواصل والملف الطبي.
+                للتواصل والملف الطبي بمعدل 9 ملفات لكل صفحة.
               </p>
             </div>
 
@@ -285,7 +345,7 @@ export default function PatientSearch() {
             <div className="flex flex-wrap items-center gap-2.5">
               <button
                 type="button"
-                onClick={() => loadData(true)}
+                onClick={() => fetchPatients(true)}
                 disabled={refreshing}
                 title="تحديث البيانات"
                 className="inline-flex h-10 items-center gap-2 rounded-2xl border border-slate-200/80 bg-white px-3.5 text-xs font-bold text-slate-700 shadow-2xs transition hover:bg-slate-50 active:scale-95 disabled:opacity-50"
@@ -333,7 +393,9 @@ export default function PatientSearch() {
               </span>
             </div>
             <div className="mt-2 flex items-baseline gap-2">
-              <span className="text-2xl font-black text-slate-900">{stats.total}</span>
+              <span className="text-2xl font-black text-slate-900">
+                {stats.total.toLocaleString('ar-EG')}
+              </span>
               <span className="text-[11px] font-medium text-slate-400">ملف مسجل</span>
             </div>
           </motion.div>
@@ -357,7 +419,9 @@ export default function PatientSearch() {
               </span>
             </div>
             <div className="mt-2 flex items-baseline gap-2">
-              <span className="text-2xl font-black text-slate-900">{stats.males}</span>
+              <span className="text-2xl font-black text-slate-900">
+                {stats.males.toLocaleString('ar-EG')}
+              </span>
               <span className="text-[11px] font-medium text-slate-400">({stats.malePct}%)</span>
             </div>
           </motion.div>
@@ -381,7 +445,9 @@ export default function PatientSearch() {
               </span>
             </div>
             <div className="mt-2 flex items-baseline gap-2">
-              <span className="text-2xl font-black text-slate-900">{stats.females}</span>
+              <span className="text-2xl font-black text-slate-900">
+                {stats.females.toLocaleString('ar-EG')}
+              </span>
               <span className="text-[11px] font-medium text-slate-400">({stats.femalePct}%)</span>
             </div>
           </motion.div>
@@ -400,7 +466,9 @@ export default function PatientSearch() {
               </span>
             </div>
             <div className="mt-2 flex items-baseline gap-2">
-              <span className="text-2xl font-black text-slate-900">{stats.clinicsCount}</span>
+              <span className="text-2xl font-black text-slate-900">
+                {clinics.length.toLocaleString('ar-EG')}
+              </span>
               <span className="text-[11px] font-medium text-slate-400">عيادة نشطة</span>
             </div>
           </motion.div>
@@ -410,7 +478,7 @@ export default function PatientSearch() {
         <div className="rounded-3xl border border-slate-200/80 bg-white/95 p-4 shadow-sm shadow-slate-200/50 backdrop-blur-md space-y-3.5">
           {/* Top Line: Search Bar + View Mode */}
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            {/* Search Input */}
+            {/* Search Input with Clear Button */}
             <div className="relative flex-1">
               <Search
                 size={16}
@@ -418,15 +486,15 @@ export default function PatientSearch() {
               />
               <input
                 type="text"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
                 placeholder="ابحث بالاسم، رقم الهاتف، الرقم القومي، أو العيادة..."
                 className="h-11 w-full rounded-2xl border border-slate-200 bg-slate-50/60 pr-10 pl-10 text-xs text-slate-900 placeholder:text-slate-400 outline-none transition focus:border-sky-500 focus:bg-white focus:ring-4 focus:ring-sky-100"
               />
-              {search && (
+              {searchInput && (
                 <button
                   type="button"
-                  onClick={() => setSearch('')}
+                  onClick={() => setSearchInput('')}
                   title="مسح البحث"
                   className="absolute left-3 top-1/2 -translate-y-1/2 rounded-lg p-1 text-slate-400 hover:text-slate-600"
                 >
@@ -440,7 +508,7 @@ export default function PatientSearch() {
               <button
                 type="button"
                 onClick={() => setViewMode('grid')}
-                title="عرض شبكة الكروت"
+                title="عرض شبكة الكروت (9 كروت)"
                 className={`flex h-9 w-9 items-center justify-center rounded-xl transition ${
                   viewMode === 'grid'
                     ? 'bg-white text-sky-600 shadow-2xs font-bold'
@@ -531,13 +599,13 @@ export default function PatientSearch() {
               </div>
 
               {/* Reset Filters */}
-              {(genderFilter !== 'all' || clinicFilter !== 'all' || search) && (
+              {(genderFilter !== 'all' || clinicFilter !== 'all' || searchInput) && (
                 <button
                   type="button"
                   onClick={() => {
                     setGenderFilter('all');
                     setClinicFilter('all');
-                    setSearch('');
+                    setSearchInput('');
                   }}
                   className="inline-flex items-center gap-1 rounded-xl px-2.5 py-1 text-xs font-bold text-rose-600 hover:bg-rose-50 transition"
                 >
@@ -556,37 +624,46 @@ export default function PatientSearch() {
             <div className="flex items-center gap-2">
               <h2 className="text-base font-black text-slate-900">سجلات المرضى</h2>
               <span className="rounded-full bg-sky-50 px-2.5 py-0.5 text-xs font-bold text-sky-700 border border-sky-100">
-                {filteredPatients.length} نتيجة
+                {totalCount.toLocaleString('ar-EG')} نتيجة إجمالية
               </span>
             </div>
 
             <p className="hidden sm:block text-xs text-slate-400">
-              اضغط على البطاقة أو الزر لعرض السجل الطبي ومتابعة الزيارات.
+              الصفحة {currentPage.toLocaleString('ar-EG')} من {pagination.totalPages.toLocaleString('ar-EG')} · 9 مرضى لكل صفحة
             </p>
           </div>
 
-          {loading ? (
-            <div className="flex flex-col items-center justify-center rounded-3xl border border-slate-200/80 bg-white/95 p-16 text-center shadow-sm">
-              <RefreshCw size={28} className="animate-spin text-sky-600" />
-              <p className="mt-3 text-sm font-bold text-slate-700">جارٍ تحميل سجلات المرضى...</p>
-              <p className="mt-1 text-xs text-slate-400">يرجى الانتظار لحظات</p>
-            </div>
-          ) : filteredPatients.length === 0 ? (
+          {loading || isPageChanging ? (
+            /* ─── Skeleton Loading Grid (Exact 9 Skeletons) ─── */
+            viewMode === 'grid' ? (
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                {Array.from({ length: PAGE_SIZE }).map((_, idx) => (
+                  <PatientCardSkeleton key={`skeleton-${idx}`} />
+                ))}
+              </div>
+            ) : (
+              <div className="overflow-hidden rounded-3xl border border-slate-200/80 bg-white/95 p-8 text-center shadow-sm">
+                <RefreshCw size={28} className="mx-auto animate-spin text-sky-600" />
+                <p className="mt-3 text-sm font-bold text-slate-700">جارٍ تحميل بيانات الصفحة {currentPage}...</p>
+              </div>
+            )
+          ) : patients.length === 0 ? (
+            /* ─── Empty State ─── */
             <div className="flex flex-col items-center justify-center rounded-3xl border border-dashed border-slate-300 bg-white/95 p-16 text-center shadow-2xs">
               <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-slate-50 text-slate-400 border border-slate-200">
                 <Users size={26} />
               </div>
               <h3 className="mt-4 text-base font-bold text-slate-800">لا توجد سجلات مطابقة</h3>
               <p className="mt-1 max-w-sm text-xs text-slate-400">
-                {search
-                  ? `لم نجد أي مريض يطابق بحثك عن "${search}". تأكد من صحة الاسم أو رقم الهاتف.`
+                {debouncedSearch
+                  ? `لم نجد أي مريض يطابق بحثك عن "${debouncedSearch}". تأكد من صحة الاسم أو رقم الهاتف.`
                   : 'لا يوجد أي مريض مسجل في هذا التصنيف حالياً.'}
               </p>
               <div className="mt-5 flex items-center gap-3">
-                {search && (
+                {debouncedSearch && (
                   <button
                     type="button"
-                    onClick={() => setSearch('')}
+                    onClick={() => setSearchInput('')}
                     className="rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50 transition"
                   >
                     مسح البحث
@@ -603,10 +680,10 @@ export default function PatientSearch() {
               </div>
             </div>
           ) : viewMode === 'grid' ? (
-            /* ─── Grid View ─── */
+            /* ─── 9-Card Grid View ─── */
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              <AnimatePresence mode="wait">
-                {displayedPatients.map((patient) => {
+              <AnimatePresence mode="popLayout">
+                {patients.map((patient) => {
                   const initials = getInitials(patient.fullName);
                   const isFemale = patient.gender === 'أنثى';
 
@@ -620,7 +697,7 @@ export default function PatientSearch() {
                       className="group relative flex flex-col justify-between overflow-hidden rounded-3xl border border-slate-200/80 bg-white/95 p-5 shadow-2xs shadow-slate-200/40 transition-all hover:border-sky-200 hover:shadow-md"
                     >
                       <div>
-                        {/* Top: Avatar + Name + Link */}
+                        {/* Top: Avatar + Name + Quick Link */}
                         <div className="flex items-start justify-between gap-3">
                           <div className="flex items-center gap-3 min-w-0">
                             {/* Avatar */}
@@ -696,7 +773,7 @@ export default function PatientSearch() {
                           </div>
                         </div>
 
-                        {/* National ID / Note if present */}
+                        {/* National ID Pill */}
                         {patient.nationalId && (
                           <div className="mt-2 flex items-center justify-between rounded-xl bg-slate-50 px-2.5 py-1.5 text-[10.5px] text-slate-500">
                             <span>الرقم القومي:</span>
@@ -790,16 +867,12 @@ export default function PatientSearch() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {displayedPatients.map((patient) => {
+                    {patients.map((patient) => {
                       const initials = getInitials(patient.fullName);
                       const isFemale = patient.gender === 'أنثى';
 
                       return (
-                        <tr
-                          key={patient._id}
-                          className="transition hover:bg-sky-50/40 group"
-                        >
-                          {/* Name & Avatar */}
+                        <tr key={patient._id} className="transition hover:bg-sky-50/40 group">
                           <td className="p-4">
                             <div className="flex items-center gap-2.5">
                               <div
@@ -819,10 +892,7 @@ export default function PatientSearch() {
                                   {patient.fullName}
                                 </Link>
                                 {patient.nationalId && (
-                                  <span
-                                    dir="ltr"
-                                    className="font-mono text-[10px] text-slate-400 block"
-                                  >
+                                  <span dir="ltr" className="font-mono text-[10px] text-slate-400 block">
                                     {patient.nationalId}
                                   </span>
                                 )}
@@ -830,14 +900,12 @@ export default function PatientSearch() {
                             </div>
                           </td>
 
-                          {/* Phone */}
                           <td className="p-4" dir="ltr">
                             <span className="font-semibold text-slate-700">
                               {patient.phone || '—'}
                             </span>
                           </td>
 
-                          {/* Gender & Age */}
                           <td className="p-4">
                             <span className="font-medium text-slate-700">
                               {patient.gender}
@@ -845,7 +913,6 @@ export default function PatientSearch() {
                             </span>
                           </td>
 
-                          {/* Clinic */}
                           <td className="p-4">
                             <span className="inline-flex items-center gap-1 font-medium text-slate-700">
                               <Building2 size={12} className="text-sky-600" />
@@ -853,12 +920,10 @@ export default function PatientSearch() {
                             </span>
                           </td>
 
-                          {/* Created By */}
                           <td className="p-4 text-slate-500">
                             {patient.createdBy?.name || 'سجل عام'}
                           </td>
 
-                          {/* Actions */}
                           <td className="p-4 text-center">
                             <div className="flex items-center justify-center gap-1.5">
                               {patient.phone && (
@@ -901,48 +966,50 @@ export default function PatientSearch() {
             </div>
           )}
 
-          {/* ─── Pagination Controls ─── */}
-          {totalPages > 1 && (
+          {/* ─── Interactive Pagination Bar UI & RTL Support ─── */}
+          {pagination.totalPages > 1 && (
             <motion.div
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               className="mt-6 flex flex-col gap-3 rounded-3xl border border-slate-200/80 bg-white/95 p-4 shadow-sm shadow-slate-200/50 backdrop-blur-md sm:flex-row sm:items-center sm:justify-between"
             >
-              {/* Results Counter */}
+              {/* Real-time Metadata Badge */}
               <div className="text-center text-xs text-slate-600 sm:text-right">
-                <span className="font-semibold">
-                  عرض {startIndex} - {endIndex}
+                <span className="font-semibold text-slate-700">
+                  عرض المرضى من {startItem.toLocaleString('ar-EG')} إلى {endItem.toLocaleString('ar-EG')}
                 </span>
-                <span className="mx-1 text-slate-400">من أصل</span>
-                <span className="font-bold text-slate-900">{filteredPatients.length}</span>
+                <span className="mx-1 text-slate-400">من إجمالي</span>
+                <span className="font-black text-sky-700">{totalCount.toLocaleString('ar-EG')}</span>
                 <span className="mr-1 text-slate-400">مريض</span>
               </div>
 
-              {/* Page Navigation */}
+              {/* Page Navigation Controls */}
               <div className="flex items-center justify-center gap-2">
-                {/* Previous Button */}
+                {/* Previous Button (ChevronRight for RTL) */}
                 <button
                   type="button"
                   onClick={() => handlePageChange(currentPage - 1)}
-                  disabled={currentPage === 1}
+                  disabled={currentPage === 1 || isPageChanging}
                   title="الصفحة السابقة"
-                  className="flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-white"
+                  className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 shadow-2xs transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
                 >
-                  <ChevronRight size={16} />
+                  <ChevronRight size={15} />
+                  <span className="hidden sm:inline">السابق</span>
                 </button>
 
-                {/* Page Numbers */}
-                <div className="flex items-center gap-1.5">{renderPageNumbers()}</div>
+                {/* Smart Page Numbers */}
+                <div className="flex items-center gap-1.5">{renderPaginationButtons()}</div>
 
-                {/* Next Button */}
+                {/* Next Button (ChevronLeft for RTL) */}
                 <button
                   type="button"
                   onClick={() => handlePageChange(currentPage + 1)}
-                  disabled={currentPage === totalPages}
+                  disabled={currentPage === pagination.totalPages || isPageChanging}
                   title="الصفحة التالية"
-                  className="flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-white"
+                  className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 shadow-2xs transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
                 >
-                  <ChevronLeft size={16} />
+                  <span className="hidden sm:inline">التالي</span>
+                  <ChevronLeft size={15} />
                 </button>
               </div>
             </motion.div>
